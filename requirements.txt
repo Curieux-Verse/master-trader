@@ -1,0 +1,27 @@
+# Master Trader — full dependency stack, grouped by the phase that first needs it.
+# The thin-slice demo runs on the base install (pandas/numpy/scipy/pyarrow + stdlib
+# sqlite3) with ZERO of the "later" groups. Install the rest as each phase lands.
+
+# --- Thin slice (P0/P1 demo) : needed now ---
+pandas>=2.0
+numpy>=1.24
+scipy>=1.10
+pyarrow>=14
+pydantic>=2.0
+
+# --- Data lake + ingestion (deepen P0) ---
+# ccxt>=4.3          # crypto live/recent fetch (CC_Trading data layer)
+# duckdb>=0.10       # columnar OLAP over the Parquet lake
+# polars>=0.20       # fast panel ops
+
+# --- Generation engines (P3) ---
+# deap>=1.4          # evolutionary / GP
+# gplearn>=0.4       # symbolic-regression factor miner
+
+# --- Self-improvement (P4) ---
+# lightgbm>=4.3      # learned combiner / attribution (already present in base env)
+# shap>=0.44         # SHAP attribution for the critic evidence pack
+# faiss-cpu>=1.7     # Lesson Library embedding search (or sqlite-vss)
+
+# Reused market stacks (CC_Trading / FX_Trading) are NOT installed here — their pure
+# functions are called via subprocess isolation (mt/adapters). See mt/config.py.

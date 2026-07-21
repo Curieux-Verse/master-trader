@@ -1,0 +1,12 @@
+# Master Trader — ignore runtime state, caches, envs
+var/
+*.pyc
+__pycache__/
+.venv/
+venv/
+.env
+*.db-wal
+*.db-shm
+.pytest_cache/
+.ipynb_checkpoints/
+# Parquet lake + run artifacts live under var/ (git-ignored); registries are reproducible from seed+snapshot

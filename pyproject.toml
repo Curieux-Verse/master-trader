@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "master-trader"
+version = "0.0.1"
+description = "Autonomous, self-improving strategy-discovery factory (crypto/FX/XAU) — the meta-layer above CC_Trading/FX_Trading."
+requires-python = ">=3.11"
+# Thin-slice runtime deps only. Heavier search/data deps (deap, gplearn, ccxt, duckdb,
+# polars, faiss) are added per phase — see requirements.txt.
+dependencies = [
+    "pandas>=2.0",
+    "numpy>=1.24",
+    "scipy>=1.10",
+    "pyarrow>=14",
+    "pydantic>=2.0",
+]
+
+[project.optional-dependencies]
+# Reused-market pure libs are imported via subprocess isolation, not installed here.
+search = ["deap>=1.4", "gplearn>=0.4"]
+data = ["ccxt>=4.3", "duckdb>=0.10", "polars>=0.20"]
+llm = []  # ollama (local) or free-tier hosted — decided at Phase 3
+dev = ["pytest>=7", "pytest-cov"]
+
+[tool.setuptools.packages.find]
+include = ["mt*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
