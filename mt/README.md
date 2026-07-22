@@ -13,8 +13,15 @@ especially the hardest risk, the package-namespace isolation — before deepenin
 ## Run it
 
 ```bash
-# THE COMPLETE SYSTEM: inner discovery loop (×gens ×markets) + outer paper loop + report
-python -m mt.run_system --generations 4 --markets crypto,fx,xau --structure 0.8
+# 1) build the REAL data lake (once): Binance (crypto, no auth) + OANDA (FX/XAU, key from
+#    FX_Trading/.env) → content-hashed Parquet under var/lake/<snapshot>/
+python -m mt.run_ingest --markets crypto,fx,xau --bars 1500 --snapshot-id real
+
+# 2a) THE COMPLETE SYSTEM on REAL data (time-split train/holdout/live, point-in-time)
+python -m mt.run_system --source lake --snapshot-id real --markets crypto,fx,xau
+
+# 2b) …or on isolated synthetic data with a labeled planted edge (validates discovery)
+python -m mt.run_system --source synthetic --structure 0.8 --markets crypto,fx,xau
 
 # the critical go/no-go: proves the gauntlet catches an overfit AND admits a real edge
 python -m mt.selftest_gauntlet
@@ -53,7 +60,7 @@ packages (`core`, `xsec`, `backtest`, `concepts`), so **only one may be on a pro
 
 | Stage | Module | Status |
 |---|---|---|
-| Data (normalized panel + Parquet lake, isolated workers) | `mt/data/` + `mt/adapters/` | ✅ isolated/synthetic (labeled edge knob); real ingestion deferred |
+| Data — normalized panel + content-hashed Parquet lake | `mt/data/` + `mt/adapters/` + `mt/ingest/` | ✅ isolated synthetic worker **AND real lake** (Binance klines/funding + OANDA candles), time-split |
 | Genome DSL + full primitive contract + registration gate | `mt/genome/` | ✅ typed I/O, PIT, data_requires, cost, provenance |
 | Primitive registry (~16 families, incl. Auction Market Theory) | `mt/genome/registry.py` + `mt/sim/features.py` | ✅ 50+ primitives; ~40 computable across all major families |
 | Simulator — Tier-1 cross-sectional + Tier-2 directional (triple-barrier) | `mt/sim/` | ✅ both phenotypes; Tier-3 tick deferred |
@@ -81,11 +88,16 @@ that writes lessons and targeted fixes + a Thompson bandit that learns which eng
 circuit breakers · a daily written report. The **gauntlet self-test proves it catches a
 deliberately-overfit strategy AND admits a genuine injected edge.**
 
-**Deferred (labeled in code):** real Binance/OANDA ingestion incl. **trades/aggTrades**
-(currently synthetic; trades unlock microstructure + AMT footprint — docs/12 §3) · declared-
-only families (SMC via `compute_smc_features`, cross-asset, macro/COT/news, ML-derived)
-awaiting their data/wrappers · Tier-3 tick simulator · regime-sliced G5 (needs regime labels)
-· R2/R3 live capital (a deliberate human decision, never the machine's).
+**Real data:** `mt/ingest/` builds a content-hashed Parquet lake — **Binance USD-M klines +
+funding** (crypto, no auth) and **OANDA v20 candles** (FX/XAU, key from `FX_Trading/.env`);
+`--source lake` reads it with an honest point-in-time train/holdout/live split.
+
+**Deferred (labeled in code):** **trades/aggTrades** bulk dumps (deep multi-year history +
+survivorship + the microstructure/AMT-*footprint* families — docs/12 §3; the REST baseline
+above gives ~1500 recent bars/tf) · declared-only families (SMC via `compute_smc_features`,
+cross-asset, macro/COT/news, ML-derived) awaiting their data/wrappers · Tier-3 tick simulator
+· regime-sliced G5 (needs regime labels) · R2/R3 live capital (a deliberate human decision,
+never the machine's).
 
 On the current **synthetic, edgeless** data the correct outcome is that the gauntlet
 rejects ~everything — "far more rejections than discoveries" is the immune system working

@@ -25,10 +25,27 @@ from pathlib import Path
 
 from mt.config import DB_PATH, RUNS_DIR, MARKETS, DEFAULT_SEED
 from mt.adapters import MarketAdapter
+from mt.data.lake import read_lake_panel, lake_has_data, snapshot_info
 from mt.store import MTStore
 from mt.improve import DiscoveryLoop
 from mt.live import PaperBook
 from mt.live.report import format_system_report, send_telegram
+
+
+def _build_panels(market, source, snapshot_id, seed, structure):
+    """Return (train, holdout, live) panels. Real data is split by TIME (point-in-time);
+    synthetic data uses independent seeded realizations."""
+    if source == "lake":
+        if not lake_has_data(market, snapshot_id):
+            return None
+        train = read_lake_panel(market, snapshot_id, 0.0, 0.70)     # search / discovery
+        holdout = read_lake_panel(market, snapshot_id, 0.70, 0.85)  # locked transfer holdout (G6)
+        live = read_lake_panel(market, snapshot_id, 0.85, 1.0)      # most recent → paper (R1)
+        return train, holdout, live
+    a = MarketAdapter(market)
+    return (a.build_panel(bars=440, seed=seed, structure=structure, snapshot_id=f"sys_{market}"),
+            a.build_panel(bars=440, seed=seed + 1, structure=structure, snapshot_id=f"sysho_{market}"),
+            a.build_panel(bars=440, seed=seed + 2, structure=structure, snapshot_id=f"syslive_{market}"))
 
 
 def _reset_db():
@@ -39,7 +56,8 @@ def _reset_db():
 
 
 def run_system(markets, generations: int, batch_size: int, seed: int, structure: float,
-               paper_days: int, reset: bool = True, use_ollama: bool = False) -> dict:
+               paper_days: int, reset: bool = True, use_ollama: bool = False,
+               source: str = "synthetic", snapshot_id: str = "real") -> dict:
     try:
         import sys
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -54,15 +72,30 @@ def run_system(markets, generations: int, batch_size: int, seed: int, structure:
     print(" MASTER TRADER — COMPLETE SYSTEM RUN  (inner discovery + outer paper loop)")
     print("=" * 72)
 
-    # ── build isolated, structured panels per market (+ unseen holdout/live) ──
+    # ── build panels per market (real lake = time-split; synthetic = seeded) ──
+    print(f"\n  DATA SOURCE: {'REAL LAKE (' + snapshot_id + ')' if source == 'lake' else 'synthetic (structure=' + str(structure) + ')'}")
     loops = {}
     live_panels = {}
+    active = []
     for m in markets:
-        print(f"\n[{m}] building isolated panels (structured synthetic; worker in {MARKETS[m].root.name})…")
-        panel = MarketAdapter(m).build_panel(bars=440, seed=seed, structure=structure, snapshot_id=f"sys_{m}")
-        holdout = MarketAdapter(m).build_panel(bars=440, seed=seed + 1, structure=structure, snapshot_id=f"sysho_{m}")
-        live_panels[m] = MarketAdapter(m).build_panel(bars=440, seed=seed + 2, structure=structure, snapshot_id=f"syslive_{m}")
+        panels = _build_panels(m, source, snapshot_id, seed, structure)
+        if panels is None:
+            print(f"  [{m}] no lake data for snapshot '{snapshot_id}' — skipping (run mt.run_ingest first).")
+            continue
+        panel, holdout, live_panels[m] = panels
+        if source == "lake":
+            info = snapshot_info(m, snapshot_id) or {}
+            print(f"  [{m}] REAL {info.get('source','')}: {len(panel.symbols)} symbols × "
+                  f"{panel.close_matrix().shape[0]} train bars @ {panel.primary_tf}  #{info.get('content_hash','')}")
+        else:
+            print(f"  [{m}] synthetic (worker in {MARKETS[m].root.name}): {len(panel.symbols)} symbols")
         loops[m] = DiscoveryLoop(store, m, panel, holdout, seed=seed, use_ollama=use_ollama)
+        active.append(m)
+    markets = active
+    if not markets:
+        print("\n  No markets have data. Run: python -m mt.run_ingest --markets crypto,fx,xau")
+        store.close()
+        return {"error": "no_data"}
 
     # ── INNER LOOP: discovery across all markets, generation by generation ──
     print(f"\n{'─'*72}\n INNER LOOP — {generations} generations × {len(markets)} markets\n{'─'*72}")
@@ -153,13 +186,16 @@ def main():
     ap.add_argument("--batch-size", type=int, default=12)
     ap.add_argument("--seed", type=int, default=DEFAULT_SEED)
     ap.add_argument("--structure", type=float, default=0.8,
-                    help="0=pure random (honest, empty archive); >0 injects a labeled synthetic edge to discover")
+                    help="synthetic only: 0=pure random (honest, empty archive); >0 injects a labeled edge")
     ap.add_argument("--paper-days", type=int, default=12)
     ap.add_argument("--ollama", action="store_true", help="use local ollama to refine critic lessons")
+    ap.add_argument("--source", choices=["synthetic", "lake"], default="synthetic",
+                    help="'lake' = REAL data ingested by mt.run_ingest; 'synthetic' = isolated workers")
+    ap.add_argument("--snapshot-id", default="real", help="lake snapshot to read (with --source lake)")
     args = ap.parse_args()
     markets = [m.strip() for m in args.markets.split(",") if m.strip()]
     run_system(markets, args.generations, args.batch_size, args.seed, args.structure,
-               args.paper_days, use_ollama=args.ollama)
+               args.paper_days, use_ollama=args.ollama, source=args.source, snapshot_id=args.snapshot_id)
 
 
 if __name__ == "__main__":
