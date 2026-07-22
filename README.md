@@ -55,4 +55,4 @@ A pool of **Generation Engines** continuously proposes candidate strategies, eac
 
 ---
 
-*Author: Principal Quantitative Researcher / Lead AI Architect. Status: architectural blueprint (design only — no execution code in this deliverable). Target markets: crypto (Binance), FX (OANDA), XAU (OANDA).*
+*Author: Principal Quantitative Researcher / Lead AI Architect. Status: **blueprint + working implementation** — the complete system (discovery → gauntlet → archive → self-improvement → paper) runs end-to-end across crypto/FX/XAU on the reused CC_Trading/FX_Trading stacks; see [`mt/`](mt/README.md). Currently on isolated synthetic data (a labeled edge knob for validation); real Binance/OANDA ingestion is the next step. Target markets: crypto (Binance), FX (OANDA), XAU (OANDA).*

@@ -106,6 +106,19 @@ class MTStore:
     def genome_count(self) -> int:
         return self.conn.execute("SELECT COUNT(*) FROM genomes").fetchone()[0]
 
+    def get_genome(self, genome_id: str):
+        row = self.conn.execute("SELECT body FROM genomes WHERE genome_id=?", (genome_id,)).fetchone()
+        if not row:
+            return None
+        from mt.genome.schema import Genome
+        return Genome.from_dict(json.loads(row["body"]))
+
+    def genome_sharpe_pp(self, genome_id: str):
+        r = self.conn.execute(
+            "SELECT sharpe_pp FROM result_ledger WHERE genome_id=? AND sharpe_pp IS NOT NULL "
+            "ORDER BY eval_id DESC LIMIT 1", (genome_id,)).fetchone()
+        return r[0] if r else None
+
     # ─── Result Ledger (the honest trial count) ──────────────────────────
     def record_eval(self, res: EvalResult) -> int:
         row = res.to_ledger_row()
