@@ -1,18 +1,30 @@
-"""mt.gauntlet.runner — run the gates in sequence and emit the fitness vector.
+"""mt.gauntlet.runner — run the gates and emit the multi-objective fitness vector.
 
-A candidate must pass every *enforced* gate. The fitness vector (docs/05 §4) is
-deliberately multi-objective to avoid Goodhart; the thin slice fills the objectives it can
-measure (deflated Sharpe, complexity) and marks the rest as pending so the archive
+A candidate must pass every *enforced* gate. Gates run cheap→expensive so most die early
+(successive halving). The fitness vector is deliberately multi-objective to avoid Goodhart
+(docs/05 §4): it fills the objectives measured and leaves the rest None so the archive
 scalarization is honest about what it optimizes.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional
+from typing import Callable, Dict, List, Optional
 
 from mt.genome.schema import Genome
 from mt.sim.evalresult import EvalResult
 from mt.gauntlet import gates as G
+
+
+@dataclass
+class GauntletContext:
+    """Everything the re-evaluating gates (G3 CPCV, G6 transfer) and G8 need."""
+    eval_fn: Optional[Callable] = None            # (genome, panel) -> EvalResult
+    panel: object = None                          # the search panel (for CPCV variants)
+    holdout_panel: object = None                  # locked, unseen (for transfer)
+    archive_returns: Dict = field(default_factory=dict)   # genome_id -> return array
+    seed: int = 4242
+    cpcv_variants: int = 6
+    cpcv_groups: int = 8
 
 
 @dataclass
@@ -27,19 +39,15 @@ class GauntletReport:
 
     def summary_line(self) -> str:
         verdict = "ADMIT" if self.passed else f"REJECT@{self.failed_gate}"
-        dsr = self.gates.get("G4_deflated_sharpe", {}).get("raw_sharpe")
-        p = self.gates.get("G4_deflated_sharpe", {}).get("dsr_pvalue")
-        return f"{self.genome_id} [{self.market:6}] {verdict:22} sharpe={dsr} dsr_p={p}"
+        g4 = self.gates.get("G4_deflated_sharpe", {})
+        return f"{self.genome_id} [{self.market:6}] {verdict:22} sharpe={g4.get('raw_sharpe')} dsr_p={g4.get('dsr_pvalue')}"
 
 
 class Gauntlet:
-    """Sequential gate runner. `trial_count` comes from the Result Ledger — the honest N."""
-
-    def run(self, genome: Genome, res: EvalResult, trial_count: int) -> GauntletReport:
-        market = genome.meta.market
-        gid = genome.genome_id
-        report = GauntletReport(genome_id=gid, market=market, passed=False, failed_gate=None)
-
+    def run(self, genome: Genome, res: EvalResult, trial_count: int,
+            ctx: Optional[GauntletContext] = None) -> GauntletReport:
+        report = GauntletReport(genome_id=genome.genome_id, market=genome.meta.market,
+                                passed=False, failed_gate=None)
         if not res.ok:
             report.failed_gate = "G0_eval"
             report.gates["G0_eval"] = {"status": "fail", "reason": res.error or "no returns"}
@@ -47,15 +55,18 @@ class Gauntlet:
 
         net = res.net_returns
         ppy = float(res.summary.get("periods_per_year", 365.0))
-        ordered: List[G.GateResult] = [
+        seed = ctx.seed if ctx else res.seed
+
+        # cheap → expensive (all enforced; first failure short-circuits the rest)
+        ordered = [
             G.g1_sanity(net),
-            G.g2_purged_wf(),
-            G.g3_cpcv_pbo(),
             G.g4_deflated_sharpe(net, trial_count, ann_factor=ppy),
-            G.g5_robustness(net, seed=res.seed),
-            G.g6_transfer(),
-            G.g7_capacity(),
-            G.g8_orthogonality(),
+            G.g5_robustness(net, seed=seed),
+            G.g2_oos_degradation(net),
+            G.g7_capacity(genome, res, ctx),
+            G.g8_orthogonality(res, ctx),
+            G.g3_cpcv_pbo(genome, ctx),
+            G.g6_transfer(genome, ctx),
         ]
 
         passed_all = True
@@ -63,7 +74,7 @@ class Gauntlet:
             report.gates[gate.name] = {"status": gate.status, "reason": gate.reason, **gate.stats}
             if gate.enforced and not gate.passed and passed_all:
                 passed_all = False
-                report.failed_gate = gate.name  # first hard failure
+                report.failed_gate = gate.name
 
         report.passed = passed_all
         report.fitness = self._fitness(genome, res, report)
@@ -72,22 +83,28 @@ class Gauntlet:
 
     def _fitness(self, genome: Genome, res: EvalResult, report: GauntletReport) -> Dict:
         g4 = report.gates.get("G4_deflated_sharpe", {})
+        g3 = report.gates.get("G3_cpcv_pbo", {})
+        g7 = report.gates.get("G7_capacity", {})
+        g8 = report.gates.get("G8_orthogonality", {})
+        pbo = g3.get("pbo")
         return {
-            "deflated_sharpe": g4.get("raw_sharpe"),      # skill after trial correction (maximize)
+            "deflated_sharpe": g4.get("raw_sharpe"),
             "dsr_pvalue": g4.get("dsr_pvalue"),
-            "one_minus_pbo": None,                        # G3 pending
-            "regime_breadth": None,                       # G5 regime slicing pending
-            "capacity_usd": None,                         # G7 pending
-            "neg_complexity": -genome.complexity(),       # Occam (minimize nodes)
-            "neg_archive_corr": None,                     # G8 pending
+            "one_minus_pbo": None if pbo is None else round(1.0 - pbo, 3),
+            "capacity_sharpe_2x": g7.get("sharpe_2x_cost"),
+            "neg_complexity": -genome.complexity(),
+            "neg_archive_corr": None if g8.get("max_corr") is None else -g8["max_corr"],
             "net_sharpe": res.summary.get("net_sharpe"),
             "max_dd": res.summary.get("max_dd"),
+            "phenotype": genome.meta.execution,
         }
 
     def _scalarize(self, fitness: Dict) -> float:
-        """Single scalar for archive replacement (a projection of the Pareto objectives)."""
         ds = fitness.get("deflated_sharpe")
         if ds is None:
             ds = fitness.get("net_sharpe") or 0.0
-        complexity_pen = -0.05 * abs(fitness.get("neg_complexity", 0))
-        return float(ds) + complexity_pen
+        base = float(ds)
+        omp = fitness.get("one_minus_pbo")
+        if omp is not None:
+            base *= max(0.0, omp)            # discount by overfitting probability
+        return base - 0.05 * abs(fitness.get("neg_complexity", 0))

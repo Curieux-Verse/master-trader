@@ -27,7 +27,7 @@ from mt.adapters import MarketAdapter
 from mt.genome.ops import mutate
 from mt.generators import TemplateSampler
 from mt.sim import evaluate
-from mt.gauntlet import Gauntlet
+from mt.gauntlet import Gauntlet, GauntletContext
 from mt.archive import MapElites
 from mt.store import MTStore
 
@@ -69,6 +69,8 @@ def run(markets, bars: int, seed: int, reset: bool) -> dict:
         print(f"  worker imported core from: {core_file}")
         print(f"  panel: {len(panel.symbols)} symbols × {panel.close_matrix().shape[0]} bars @ {panel.primary_tf}")
 
+        ctx = GauntletContext(eval_fn=lambda g, p: evaluate(g, p, seed), panel=panel, seed=seed)
+
         genomes = sampler.sample(market, n_random=6)
         # add one mutation to exercise the evolutionary operator + lineage
         genomes.append(mutate(genomes[0], rng))
@@ -85,7 +87,7 @@ def run(markets, bars: int, seed: int, reset: bool) -> dict:
             stats["evaluated"] += 1
 
             n_trials = store.trial_count()               # deflate for everything tried so far
-            report = gauntlet.run(g, res, trial_count=n_trials)
+            report = gauntlet.run(g, res, trial_count=n_trials, ctx=ctx)
             store.record_gauntlet(g.genome_id, market, report.passed, report.failed_gate,
                                   report.gates, report.fitness)
 

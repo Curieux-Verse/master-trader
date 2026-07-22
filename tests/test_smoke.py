@@ -109,13 +109,12 @@ def test_g1_catches_single_period_dominance():
 
 
 def test_g4_deflates_with_trials():
-    # a mediocre series that is "significant" at N=1 should weaken as trials grow
+    # more trials ⇒ higher deflated p-value (harder to be significant)
     net = pd.Series(np.random.default_rng(0).normal(0.01, 0.02, 120))
-    lax = g4_deflated_sharpe(net, trial_count=1)
-    strict = g4_deflated_sharpe(net, trial_count=5000)
-    p_lax = lax.stats.get("dsr_pvalue") or 1.0
-    p_strict = strict.stats.get("dsr_pvalue") or 1.0
-    assert p_strict >= p_lax        # more trials ⇒ harder to be significant
+    p_lax = g4_deflated_sharpe(net, trial_count=1).stats.get("dsr_pvalue")
+    p_strict = g4_deflated_sharpe(net, trial_count=5000).stats.get("dsr_pvalue")
+    assert p_lax is not None and p_strict is not None
+    assert p_strict >= p_lax - 1e-9
 
 
 def test_store_dedup_and_ledger(tmp_path):
@@ -176,6 +175,14 @@ def test_declared_only_primitive_is_not_sampled():
         ops_used.update(f.op for f in g.features)
     assert "stacked_imbalance" not in ops_used and "absorption" not in ops_used
     assert REGISTRY["stacked_imbalance"].computable is False
+
+
+def test_gauntlet_is_trustworthy():
+    # the critical go/no-go (docs/09 P2): catches an overfit AND admits a real edge
+    from mt.selftest_gauntlet import run
+    r = run(verbose=False)
+    assert r["trap_ok"], "gauntlet failed to catch a deliberately-overfit strategy"
+    assert r["edge_ok"], "gauntlet rejected a genuine injected edge"
 
 
 if __name__ == "__main__":

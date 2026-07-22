@@ -6,7 +6,7 @@ G4 (Deflated Sharpe, the multiple-testing firewall, using the honest ledger tria
 and G5 (stationary-bootstrap robustness) with CC_Trading's REAL implementations; G2/G3/
 G6/G7/G8 are recorded as deferred, not silently skipped.
 """
-from mt.gauntlet.runner import Gauntlet, GauntletReport
+from mt.gauntlet.runner import Gauntlet, GauntletReport, GauntletContext
 from mt.gauntlet.gates import GateResult
 
-__all__ = ["Gauntlet", "GauntletReport", "GateResult"]
+__all__ = ["Gauntlet", "GauntletReport", "GauntletContext", "GateResult"]

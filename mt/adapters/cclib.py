@@ -103,34 +103,63 @@ def bootstrap_drawdown(returns: List[float], n_sims: int = 5000, seed: int = 42)
 
 
 # ─── Deflated Sharpe (Bailey & López de Prado) ───────────────────────────
+# NOTE: mt implements DSR itself rather than delegating to CC_Trading's
+# SMC_ML.compute_deflated_sharpe. That function computes the multiple-testing threshold as
+# E[max SR] = sqrt(2·ln N) WITHOUT scaling by the SR standard error σ_SR, which for a
+# per-observation-Sharpe return series (~0.05–0.5) makes the bar ~30× too high — it would
+# reject every realistic edge, so the archive could never admit anything. The correct
+# deflation scales the threshold by σ_SR (Bailey & López de Prado 2014, eq. 6). We estimate
+# σ_SR from the Result Ledger's cross-trial Sharpe dispersion when available, else from the
+# candidate's own SR standard error (the √(1/T) proxy). CC_Trading's version is retained for
+# reference/cross-checks only.
 try:
-    from SMC_ML.smc_ml_diagnostics import compute_deflated_sharpe as _cc_dsr  # type: ignore
+    from SMC_ML.smc_ml_diagnostics import compute_deflated_sharpe as cc_compute_deflated_sharpe  # type: ignore
     HAVE_CC_DSR = True
 except Exception:  # pragma: no cover
     HAVE_CC_DSR = False
-    _cc_dsr = None
+    cc_compute_deflated_sharpe = None
 
 
-def deflated_sharpe(returns: List[float], n_trials: int, annualization_factor: float = 365.0) -> dict:
-    """Deflated Sharpe via CC_Trading's implementation (the multiple-testing firewall,
-    docs/05 G4). `n_trials` is the honest family size from the Result Ledger."""
-    r = [float(x) for x in returns if np.isfinite(x)]
-    if len(r) < 10:
-        return {"error": "too_few_returns", "n": len(r)}
-    if HAVE_CC_DSR:
-        out = _cc_dsr(r, n_trials=n_trials, annualization_factor=annualization_factor)
-        out["engine"] = "cc_trading"
-        return out
-    # minimal fallback (used only if CC_Trading is unavailable)
-    from scipy import stats
-    arr = np.asarray(r)
-    sr = arr.mean() / arr.std(ddof=1) if arr.std(ddof=1) > 0 else 0.0
-    n = len(arr)
-    sk = float(stats.skew(arr)); ku = float(stats.kurtosis(arr, fisher=True))
-    se = np.sqrt(max(1e-9, (1 - sk * sr + (ku) / 4.0 * sr ** 2) / (n - 1)))
-    emax = np.sqrt(2 * np.log(max(2, n_trials))) * se
-    z = (sr - emax) / se
-    p = 1.0 - float(stats.norm.cdf(z))
-    return {"raw_sharpe": float(sr), "sr_annualized": float(sr * np.sqrt(annualization_factor)),
-            "expected_max_sr": float(emax), "dsr_z_score": float(z), "dsr_pvalue": float(p),
-            "is_significant": bool(p < 0.05), "engine": "mt_fallback", "n_trials": int(n_trials)}
+def deflated_sharpe(returns: List[float], n_trials: int, annualization_factor: float = 365.0,
+                    sr_trial_std: float = None) -> dict:
+    """Correct Deflated Sharpe — the multiple-testing firewall (docs/05 G4).
+
+    `n_trials` is the honest family size from the Result Ledger; `sr_trial_std` is the std of
+    per-observation Sharpes across those trials (the ledger's dispersion) — the σ_SR that
+    scales the deflation threshold. A candidate is significant iff its Sharpe clears the
+    expected maximum Sharpe of N lucky trials.
+    """
+    from scipy.stats import norm, skew, kurtosis
+    r = np.asarray([float(x) for x in returns if np.isfinite(x)], dtype=float)
+    T = len(r)
+    if T < 10:
+        return {"error": "too_few_returns", "n": int(T)}
+    mu = float(r.mean()); sigma = float(r.std(ddof=1))
+    if sigma < 1e-12:
+        return {"error": "zero_variance"}
+    sr = mu / sigma                                   # per-observation Sharpe
+    s = float(skew(r)); ek = float(kurtosis(r, fisher=True)); g4 = ek + 3.0
+    sr_se = float(np.sqrt(max(1e-12, (1.0 - s * sr + ((g4 - 1.0) / 4.0) * sr ** 2) / (T - 1))))
+    sigma_sr = float(sr_trial_std) if (sr_trial_std and sr_trial_std > 0) else sr_se
+
+    N = max(1, int(n_trials))
+    if N > 1:                                          # Bailey & López de Prado E[max SR]
+        gamma = 0.5772156649
+        z1 = float(norm.ppf(1.0 - 1.0 / N))
+        z2 = float(norm.ppf(1.0 - 1.0 / (N * np.e)))
+        e_max = sigma_sr * ((1.0 - gamma) * z1 + gamma * z2)
+    else:
+        e_max = 0.0
+
+    z = (sr - e_max) / sr_se
+    dsr = float(norm.cdf(z))
+    dsr_pvalue = float(1.0 - dsr)                      # probability the edge is a multiple-testing artifact
+    haircut = float(max(0.0, (e_max / abs(sr) - 1.0)) * 100.0) if abs(sr) > 1e-10 else 0.0
+    return {
+        "n_returns": int(T), "raw_sharpe": round(sr, 5),
+        "sr_annualized": round(sr * float(np.sqrt(min(T, annualization_factor))), 5),
+        "skewness": round(s, 5), "excess_kurtosis": round(ek, 5), "sr_std_error": round(sr_se, 6),
+        "sigma_sr": round(sigma_sr, 6), "n_trials": N, "expected_max_sr": round(e_max, 5),
+        "deflated_sharpe": round(dsr, 5), "dsr_z_score": round(z, 5), "dsr_pvalue": round(dsr_pvalue, 5),
+        "is_significant": bool(dsr_pvalue < 0.05), "haircut_pct": round(haircut, 2), "engine": "mt_dsr",
+    }
