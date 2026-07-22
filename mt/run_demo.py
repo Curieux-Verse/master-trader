@@ -26,7 +26,7 @@ from mt.config import DB_PATH, RUNS_DIR, MARKETS, DATA_SNAPSHOT_ID, DEFAULT_SEED
 from mt.adapters import MarketAdapter
 from mt.genome.ops import mutate
 from mt.generators import TemplateSampler
-from mt.sim import Tier1Executor
+from mt.sim import evaluate
 from mt.gauntlet import Gauntlet
 from mt.archive import MapElites
 from mt.store import MTStore
@@ -48,7 +48,6 @@ def run(markets, bars: int, seed: int, reset: bool) -> dict:
     if reset:
         _reset_db()
     store = MTStore()
-    executor = Tier1Executor(seed=seed)
     gauntlet = Gauntlet()
     archive = MapElites(store)
     sampler = TemplateSampler(seed=seed)
@@ -81,7 +80,7 @@ def run(markets, bars: int, seed: int, reset: bool) -> dict:
             newly = store.register_genome(g)
             stats["new" if newly else "dup"] += 1
 
-            res = executor.evaluate(g, panel)
+            res = evaluate(g, panel, seed)
             store.record_eval(res)                       # EVERY eval → ledger (honest N)
             stats["evaluated"] += 1
 

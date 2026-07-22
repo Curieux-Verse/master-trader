@@ -162,13 +162,191 @@ def rotation_factor(panel: NormPanel, args: dict, tf: str) -> pd.DataFrame:
             - down.rolling(w, min_periods=max(3, w // 3)).sum()) / w
 
 
+# ─── extended families (breadth: no school of thought privileged, docs/11) ─
+def _mats(panel: NormPanel, tf: str):
+    close = _close(panel, tf)
+    high = panel.field_matrix("high", tf).reindex_like(close)
+    low = panel.field_matrix("low", tf).reindex_like(close)
+    vol = panel.field_matrix("volume", tf).reindex_like(close)
+    atr = panel.field_matrix("atr_14", tf).reindex_like(close).replace(0, np.nan)
+    return close, high, low, vol, atr
+
+
+def _mp(w):
+    return max(3, w // 3)
+
+
+# — trend —
+def sma_dist(panel, args, tf):
+    w = int(args.get("window", 50)); close, _, _, _, atr = _mats(panel, tf)
+    return (close - close.rolling(w, min_periods=_mp(w)).mean()) / atr
+
+
+def ma_cross(panel, args, tf):
+    fast = int(args.get("fast", 12)); slow = int(args.get("slow", 48))
+    close, _, _, _, atr = _mats(panel, tf)
+    return (close.ewm(span=fast, min_periods=_mp(fast)).mean()
+            - close.ewm(span=slow, min_periods=_mp(slow)).mean()) / atr
+
+
+def slope(panel, args, tf):
+    w = int(args.get("window", 20)); close, _, _, _, atr = _mats(panel, tf)
+    return close.diff().rolling(w, min_periods=_mp(w)).mean() / atr
+
+
+def adx(panel, args, tf):
+    w = int(args.get("window", 14)); close, high, low, _, _ = _mats(panel, tf)
+    up = high.diff(); dn = -low.diff()
+    plus_dm = up.where((up > dn) & (up > 0), 0.0)
+    minus_dm = dn.where((dn > up) & (dn > 0), 0.0)
+    prev_close = close.shift(1)
+    tr = np.maximum(np.maximum((high - low).abs(), (high - prev_close).abs()), (low - prev_close).abs())
+    a = 1.0 / w
+    atr_ = tr.ewm(alpha=a, min_periods=w).mean().replace(0, np.nan)
+    plus_di = 100 * plus_dm.ewm(alpha=a, min_periods=w).mean() / atr_
+    minus_di = 100 * minus_dm.ewm(alpha=a, min_periods=w).mean() / atr_
+    dx = 100 * (plus_di - minus_di).abs() / (plus_di + minus_di).replace(0, np.nan)
+    return (dx.ewm(alpha=a, min_periods=w).mean() - 20.0) / 20.0
+
+
+# — oscillators —
+def macd(panel, args, tf):
+    f = int(args.get("fast", 12)); s = int(args.get("slow", 26)); sig = int(args.get("signal", 9))
+    close, _, _, _, atr = _mats(panel, tf)
+    line = close.ewm(span=f, min_periods=_mp(f)).mean() - close.ewm(span=s, min_periods=_mp(s)).mean()
+    return (line - line.ewm(span=sig, min_periods=_mp(sig)).mean()) / atr
+
+
+def stoch(panel, args, tf):
+    w = int(args.get("window", 14)); close, high, low, _, _ = _mats(panel, tf)
+    ll = low.rolling(w, min_periods=_mp(w)).min(); hh = high.rolling(w, min_periods=_mp(w)).max()
+    return (2 * (close - ll) / (hh - ll).replace(0, np.nan) - 1.0)
+
+
+def cci(panel, args, tf):
+    w = int(args.get("window", 20)); close, high, low, _, _ = _mats(panel, tf)
+    tp = (high + low + close) / 3.0
+    ma = tp.rolling(w, min_periods=_mp(w)).mean()
+    md = (tp - ma).abs().rolling(w, min_periods=_mp(w)).mean().replace(0, np.nan)
+    return ((tp - ma) / (0.015 * md)).clip(-300, 300) / 100.0
+
+
+def williams_r(panel, args, tf):
+    w = int(args.get("window", 14)); close, high, low, _, _ = _mats(panel, tf)
+    hh = high.rolling(w, min_periods=_mp(w)).max(); ll = low.rolling(w, min_periods=_mp(w)).min()
+    return (2 * (close - ll) / (hh - ll).replace(0, np.nan) - 1.0)
+
+
+def roc(panel, args, tf):
+    w = int(args.get("window", 12)); return _close(panel, tf).pct_change(w)
+
+
+# — volatility —
+def bb_position(panel, args, tf):
+    w = int(args.get("window", 20)); mult = float(args.get("mult", 2.0))
+    close, _, _, _, _ = _mats(panel, tf)
+    ma = close.rolling(w, min_periods=_mp(w)).mean(); sd = close.rolling(w, min_periods=_mp(w)).std()
+    return (close - ma) / (mult * sd).replace(0, np.nan)
+
+
+def atr_expansion(panel, args, tf):
+    w = int(args.get("window", 48)); _, _, _, _, atr = _mats(panel, tf)
+    return atr / atr.rolling(w, min_periods=_mp(w)).mean() - 1.0
+
+
+def vol_of_vol(panel, args, tf):
+    w = int(args.get("window", 48)); close = _close(panel, tf)
+    rv = close.pct_change().rolling(w, min_periods=_mp(w)).std()
+    return -rv.rolling(w, min_periods=_mp(w)).std()
+
+
+# — volume —
+def obv(panel, args, tf):
+    w = int(args.get("window", 48)); close, _, _, vol, _ = _mats(panel, tf)
+    o = (np.sign(close.diff()) * vol).cumsum()
+    return (o - o.rolling(w, min_periods=_mp(w)).mean()) / o.rolling(w, min_periods=_mp(w)).std().replace(0, np.nan)
+
+
+def vwap_distance(panel, args, tf):
+    w = int(args.get("window", 48)); close, _, _, vol, atr = _mats(panel, tf)
+    vwap = (close * vol).rolling(w, min_periods=_mp(w)).sum() / vol.rolling(w, min_periods=_mp(w)).sum().replace(0, np.nan)
+    return (close - vwap) / atr
+
+
+def rel_volume(panel, args, tf):
+    w = int(args.get("window", 48)); _, _, _, vol, _ = _mats(panel, tf)
+    return vol / vol.rolling(w, min_periods=_mp(w)).mean().replace(0, np.nan) - 1.0
+
+
+def volume_zscore(panel, args, tf):
+    w = int(args.get("window", 48)); _, _, _, vol, _ = _mats(panel, tf)
+    return (vol - vol.rolling(w, min_periods=_mp(w)).mean()) / vol.rolling(w, min_periods=_mp(w)).std().replace(0, np.nan)
+
+
+# — statistical / econometric —
+def autocorr(panel, args, tf):
+    lag = int(args.get("lag", 1)); w = int(args.get("window", 48))
+    r = _close(panel, tf).pct_change(); y = r.shift(lag)
+    mx = r.rolling(w, min_periods=_mp(w)).mean(); my = y.rolling(w, min_periods=_mp(w)).mean()
+    cov = (r * y).rolling(w, min_periods=_mp(w)).mean() - mx * my
+    return cov / (r.rolling(w, min_periods=_mp(w)).std() * y.rolling(w, min_periods=_mp(w)).std()).replace(0, np.nan)
+
+
+def variance_ratio(panel, args, tf):
+    w = int(args.get("window", 96)); q = int(args.get("q", 4))
+    close = _close(panel, tf)
+    v1 = close.pct_change().rolling(w, min_periods=_mp(w)).var()
+    vq = close.pct_change(q).rolling(w, min_periods=_mp(w)).var()
+    return vq / (q * v1).replace(0, np.nan) - 1.0            # >0 trending, <0 mean-reverting
+
+
+def rolling_skew(panel, args, tf):
+    w = int(args.get("window", 48)); return _close(panel, tf).pct_change().rolling(w, min_periods=_mp(w)).skew()
+
+
+def rolling_kurt(panel, args, tf):
+    w = int(args.get("window", 48)); return _close(panel, tf).pct_change().rolling(w, min_periods=_mp(w)).kurt()
+
+
+def hurst(panel, args, tf):
+    """Cheap persistence proxy in ~[0,1]: 0.5 + 0.5·lag-1 autocorrelation of returns."""
+    w = int(args.get("window", 120))
+    return 0.5 + 0.5 * autocorr(panel, {"lag": 1, "window": w}, tf)
+
+
+def price_zscore(panel, args, tf):
+    w = int(args.get("window", 48)); close = _close(panel, tf)
+    return (close - close.rolling(w, min_periods=_mp(w)).mean()) / close.rolling(w, min_periods=_mp(w)).std().replace(0, np.nan)
+
+
+# — pattern / shape —
+def consolidation_score(panel, args, tf):
+    w = int(args.get("window", 20)); close, high, low, _, _ = _mats(panel, tf)
+    rng = high.rolling(w, min_periods=_mp(w)).max() - low.rolling(w, min_periods=_mp(w)).min()
+    longer = high.rolling(3 * w, min_periods=_mp(w)).max() - low.rolling(3 * w, min_periods=_mp(w)).min()
+    return 1.0 - rng / longer.replace(0, np.nan)             # high ⇒ tight consolidation
+
+
 BUILDERS: Dict[str, Callable[[NormPanel, dict, str], pd.DataFrame]] = {
+    # classical
     "momentum": momentum, "reversion": reversion, "ema_dist": ema_dist, "rsi": rsi,
     "realized_vol": realized_vol, "breakout": breakout, "atr_pct": atr_pct, "funding_z": funding_z,
     # AMT / order-flow proxies
     "dist_to_poc": dist_to_poc, "value_area_position": value_area_position,
-    "cumulative_delta": cumulative_delta, "delta_divergence": delta_divergence,
-    "rotation_factor": rotation_factor,
+    "cumulative_delta": cumulative_delta, "delta_divergence": delta_divergence, "rotation_factor": rotation_factor,
+    # trend
+    "sma_dist": sma_dist, "ma_cross": ma_cross, "slope": slope, "adx": adx,
+    # oscillators
+    "macd": macd, "stoch": stoch, "cci": cci, "williams_r": williams_r, "roc": roc,
+    # volatility
+    "bb_position": bb_position, "atr_expansion": atr_expansion, "vol_of_vol": vol_of_vol,
+    # volume
+    "obv": obv, "vwap_distance": vwap_distance, "rel_volume": rel_volume, "volume_zscore": volume_zscore,
+    # statistical
+    "autocorr": autocorr, "variance_ratio": variance_ratio, "rolling_skew": rolling_skew,
+    "rolling_kurt": rolling_kurt, "hurst": hurst, "price_zscore": price_zscore,
+    # pattern
+    "consolidation_score": consolidation_score,
 }
 
 

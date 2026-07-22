@@ -128,20 +128,20 @@ class Tier1Executor:
     # ── signal combination ───────────────────────────────────────────────
     def _signal(self, genome: Genome, feat_z: Dict[str, pd.DataFrame], grid: pd.DataFrame) -> Tuple[str, pd.DataFrame]:
         direction = genome.signal.args.get("direction", "neutral")
-        if genome.signal.op == "gated_and":
+        if genome.signal.op in ("gated_and", "gated_or"):
             thr = float(genome.signal.args.get("threshold", 0.5))
-            if direction == "short_bias":
-                gate = None
-                for z in feat_z.values():
-                    g = (z < -thr)
-                    gate = g if gate is None else (gate & g)
-                mat = (-gate.astype(float)) if gate is not None else grid * 0.0
-            else:  # long_bias (default)
-                gate = None
-                for z in feat_z.values():
-                    g = (z > thr)
-                    gate = g if gate is None else (gate & g)
-                mat = gate.astype(float) if gate is not None else grid * 0.0
+            use_or = genome.signal.op == "gated_or"
+            short = direction == "short_bias"
+            gate = None
+            for z in feat_z.values():
+                g = (z < -thr) if short else (z > thr)
+                if gate is None:
+                    gate = g
+                else:
+                    gate = (gate | g) if use_or else (gate & g)
+            mat = gate.astype(float) if gate is not None else grid * 0.0
+            if short:
+                mat = -mat
             return "gated", mat.reindex(index=grid.index, columns=grid.columns).fillna(0.0)
 
         # weighted_blend: equal-weight z-score sum (the honest v1 blend)

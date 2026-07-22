@@ -35,10 +35,11 @@ class Meta:
     ltf: str = ""
     rebalance: str = ""
     cost_profile: str = "default"
+    execution: str = "cross_sectional"   # "cross_sectional" (rank book) | "directional" (per-symbol)
 
     def to_dict(self) -> dict:
-        return {"market": self.market, "htf": self.htf, "mtf": self.mtf,
-                "ltf": self.ltf, "rebalance": self.rebalance, "cost_profile": self.cost_profile}
+        return {"market": self.market, "htf": self.htf, "mtf": self.mtf, "ltf": self.ltf,
+                "rebalance": self.rebalance, "cost_profile": self.cost_profile, "execution": self.execution}
 
 
 @dataclass

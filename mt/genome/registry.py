@@ -204,10 +204,66 @@ register(OpSpec("absorption", "feature", {"window": ArgSpec("int", 3, 50, defaul
                 tags=("auction_market_theory", "order_flow", "footprint"), computable=False,
                 doc="large passive fills halting price (needs trades)"))
 
+# ── extended computable families (breadth mandate — no school privileged) ──
+# trend
+register(OpSpec("sma_dist", "feature", {"window": _win(50)}, output="Series[zscore]",
+                tags=("trend", "classical_ta"), computable=True))
+register(OpSpec("ma_cross", "feature",
+                {"fast": ArgSpec("int", 3, 50, default=12), "slow": _win(48, 10, 200)},
+                output="Series[zscore]", tags=("trend",), computable=True))
+register(OpSpec("slope", "feature", {"window": _win(20, 5, 120)}, output="Series[zscore]",
+                tags=("trend",), computable=True))
+register(OpSpec("adx", "feature", {"window": ArgSpec("int", 5, 50, default=14)},
+                output="Series[zscore]", tags=("trend", "classical_ta"), computable=True))
+# oscillators
+register(OpSpec("macd", "feature",
+                {"fast": ArgSpec("int", 5, 20, default=12), "slow": ArgSpec("int", 20, 60, default=26),
+                 "signal": ArgSpec("int", 5, 20, default=9)}, output="Series[zscore]",
+                tags=("momentum", "oscillator"), computable=True))
+register(OpSpec("stoch", "feature", {"window": ArgSpec("int", 5, 50, default=14)},
+                output="Series[osc_0_100]", tags=("oscillator",), computable=True))
+register(OpSpec("cci", "feature", {"window": _win(20, 5, 100)}, output="Series[zscore]",
+                tags=("oscillator",), computable=True))
+register(OpSpec("williams_r", "feature", {"window": ArgSpec("int", 5, 50, default=14)},
+                output="Series[osc_0_100]", tags=("oscillator",), computable=True))
+register(OpSpec("roc", "feature", {"window": _win(12, 2, 120)}, output="Series[return]",
+                tags=("momentum",), computable=True))
+# volatility
+register(OpSpec("bb_position", "feature", {"window": _win(20, 10, 100), "mult": ArgSpec("float", 1.5, 3.0, default=2.0)},
+                output="Series[osc_0_100]", tags=("volatility",), computable=True))
+register(OpSpec("atr_expansion", "feature", {"window": _win(48, 10, 200)}, output="Series[zscore]",
+                tags=("volatility",), computable=True))
+register(OpSpec("vol_of_vol", "feature", {"window": _win(48, 10, 200)}, output="Series[return]",
+                tags=("volatility",), computable=True))
+# volume
+register(OpSpec("obv", "feature", {"window": _win(48, 10, 200)}, output="Series[zscore]",
+                tags=("volume",), computable=True))
+register(OpSpec("vwap_distance", "feature", {"window": _win(48, 10, 200)}, output="Series[zscore]",
+                tags=("volume", "auction_market_theory"), computable=True))
+register(OpSpec("rel_volume", "feature", {"window": _win(48, 10, 200)}, output="Series[return]",
+                tags=("volume",), computable=True))
+register(OpSpec("volume_zscore", "feature", {"window": _win(48, 10, 200)}, output="Series[zscore]",
+                tags=("volume",), computable=True))
+# statistical / econometric
+register(OpSpec("autocorr", "feature", {"lag": ArgSpec("int", 1, 10, default=1), "window": _win(48, 20, 200)},
+                output="Series[zscore]", cost_class="medium", tags=("statistical",), computable=True))
+register(OpSpec("variance_ratio", "feature", {"window": _win(96, 40, 300), "q": ArgSpec("int", 2, 10, default=4)},
+                output="Series[zscore]", cost_class="medium", tags=("statistical",), computable=True,
+                doc="trend vs mean-revert diagnostic"))
+register(OpSpec("rolling_skew", "feature", {"window": _win(48, 20, 200)}, output="Series[zscore]",
+                tags=("statistical",), computable=True))
+register(OpSpec("rolling_kurt", "feature", {"window": _win(48, 20, 200)}, output="Series[zscore]",
+                tags=("statistical",), computable=True))
+register(OpSpec("price_zscore", "feature", {"window": _win(48, 10, 200)}, output="Series[zscore]",
+                tags=("statistical", "mean_reversion"), computable=True))
+# pattern
+register(OpSpec("consolidation_score", "feature", {"window": _win(20, 8, 100)}, output="Series[osc_0_100]",
+                tags=("pattern",), computable=True))
+
 # ── other families: declared-only, to show the contract's breadth (docs/12 §2) ──
 register(OpSpec("hurst", "feature", {"window": _win(120, 40, 400)}, output="Series[zscore]",
-                cost_class="heavy", tags=("statistical", "persistence"), computable=False,
-                doc="Hurst exponent (compute pending)"))
+                cost_class="medium", tags=("statistical", "persistence"), computable=True,
+                doc="persistence proxy: 0.5 + 0.5·lag-1 autocorr of returns"))
 register(OpSpec("candlestick_pattern", "feature",
                 {"pattern": ArgSpec("choice", choices=("engulfing", "pin", "doji", "inside"), default="engulfing")},
                 output="Series[binary]", tags=("pattern",), computable=False))
@@ -240,7 +296,12 @@ register(OpSpec("gated_and", "signal",
                 {"threshold": ArgSpec("float", 0.0, 2.0, default=0.5),
                  "direction": ArgSpec("choice", choices=("long_bias", "short_bias"), default="long_bias")},
                 output="Signal", inputs=("Series[zscore]",), tags=("logic", "gate"), computable=True,
-                doc="long/short only where every feature clears a z-threshold"))
+                doc="long/short only where EVERY feature clears a z-threshold"))
+register(OpSpec("gated_or", "signal",
+                {"threshold": ArgSpec("float", 0.0, 2.0, default=0.7),
+                 "direction": ArgSpec("choice", choices=("long_bias", "short_bias"), default="long_bias")},
+                output="Signal", inputs=("Series[zscore]",), tags=("logic", "gate"), computable=True,
+                doc="long/short where ANY feature clears a z-threshold"))
 
 # ── §5 sizing ops ──
 register(OpSpec("rank_bucket", "sizing",
@@ -260,3 +321,17 @@ register(OpSpec("horizon_hold", "risk",
                  "cost_stress": ArgSpec("float", 1.0, 2.0, default=1.0)},
                 output="OrderIntent", inputs=("Position",), tags=("holding",), computable=True,
                 doc="non-overlapping holding horizon; cost_stress multiplies costs"))
+register(OpSpec("triple_barrier", "risk",
+                {"entry_thr": ArgSpec("float", 0.2, 1.5, default=0.6),
+                 "sl_mult": ArgSpec("float", 0.5, 3.0, default=1.5),
+                 "tp_mult": ArgSpec("float", 1.0, 5.0, default=2.5),
+                 "max_bars": ArgSpec("int", 4, 48, log=True, default=16),
+                 "cost_stress": ArgSpec("float", 1.0, 2.0, default=1.0)},
+                output="OrderIntent", inputs=("Position",), tags=("directional", "labeling"), computable=True,
+                doc="López-de-Prado triple barrier (ATR TP/SL + time stop) — directional phenotype"))
+
+# ── §5 sizing (directional) ──
+register(OpSpec("fixed_fractional", "sizing", {"f": ArgSpec("float", 0.02, 0.30, default=0.10)},
+                output="Position", inputs=("Signal",), tags=("directional",), computable=True))
+register(OpSpec("atr_scaled", "sizing", {"atr_mult": ArgSpec("float", 0.5, 4.0, default=1.5)},
+                output="Position", inputs=("Signal",), tags=("directional",), computable=True))
