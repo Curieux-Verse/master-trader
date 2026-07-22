@@ -38,8 +38,10 @@ def snapshot_info(market: str, snapshot_id: str) -> Optional[dict]:
 
 
 def read_lake_panel(market: str, snapshot_id: str, start_frac: float = 0.0,
-                    end_frac: float = 1.0) -> NormPanel:
-    """Load a NormPanel from the lake, optionally sliced to a time fraction [start,end)."""
+                    end_frac: float = 1.0, max_bars: int = None) -> NormPanel:
+    """Load a NormPanel from the lake, sliced to a time fraction [start,end) and optionally
+    capped to the most recent `max_bars` bars per frame (keeps feature/backtest cost bounded
+    while staying real and point-in-time)."""
     man_path = market_dir(snapshot_id, market) / "_snapshot.json"
     if not man_path.exists():
         raise FileNotFoundError(f"no lake snapshot for {market}/{snapshot_id}")
@@ -49,14 +51,18 @@ def read_lake_panel(market: str, snapshot_id: str, start_frac: float = 0.0,
     panel = load_norm_panel(manifest, tfs)
     panel.snapshot_id = snapshot_id
 
-    if start_frac > 0.0 or end_frac < 1.0:
+    if start_frac > 0.0 or end_frac < 1.0 or max_bars:
         for sym, tfd in panel.frames.items():
             for tf, df in list(tfd.items()):
                 n = len(df)
                 lo, hi = int(start_frac * n), int(end_frac * n)
-                tfd[tf] = df.iloc[lo:hi].reset_index(drop=True)
+                sliced = df.iloc[lo:hi]
+                if max_bars and len(sliced) > max_bars:
+                    sliced = sliced.iloc[-max_bars:]
+                tfd[tf] = sliced.reset_index(drop=True)
         primary = panel.primary_tf
         if primary:
             panel.snapshot = build_snapshot_from_frames(panel.frames, primary)
         panel.symbols = sorted(panel.frames)
+        panel.invalidate_cache()
     return panel

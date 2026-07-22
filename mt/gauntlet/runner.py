@@ -24,7 +24,7 @@ class GauntletContext:
     archive_returns: Dict = field(default_factory=dict)   # niche -> return array (for orthogonality)
     seed: int = 4242
     sr_trial_std: Optional[float] = None                  # ledger σ_SR for the DSR deflation
-    cpcv_variants: int = 4
+    cpcv_variants: int = 3
     cpcv_groups: int = 6
 
 

@@ -39,35 +39,38 @@ class NormPanel:
     frames: Dict[str, Dict[str, pd.DataFrame]] = field(default_factory=dict)  # symbol -> {tf: OHLCV df}
     snapshot: pd.DataFrame = field(default_factory=pd.DataFrame)               # index=symbol, cols=SNAPSHOT_COLS
     timeframes: Dict[str, str] = field(default_factory=dict)                   # {"htf","mtf","ltf"} -> tf label
+    _mat_cache: Dict = field(default_factory=dict, repr=False, compare=False)  # (field, tf) -> matrix
 
     @property
     def primary_tf(self) -> Optional[str]:
         return self.timeframes.get("htf")
 
+    def invalidate_cache(self) -> None:
+        self._mat_cache.clear()
+
     def close_matrix(self, tf: Optional[str] = None) -> pd.DataFrame:
-        """[time x symbol] close matrix at a timeframe — the Tier-1 working form."""
-        tf = tf or self.primary_tf
-        cols = {}
-        for sym, tfs in self.frames.items():
-            df = tfs.get(tf)
-            if df is None or df.empty:
-                continue
-            cols[sym] = pd.Series(df["close"].to_numpy(), index=pd.to_datetime(df["datetime"]))
-        if not cols:
-            return pd.DataFrame()
-        return pd.DataFrame(cols).sort_index()
+        """[time x symbol] close matrix at a timeframe — the Tier-1 working form (cached)."""
+        return self.field_matrix("close", tf)
 
     def field_matrix(self, field_name: str, tf: Optional[str] = None) -> pd.DataFrame:
+        """[time x symbol] matrix for one OHLCV field (cached — built once per panel).
+
+        The panel is read-only during a run, so caching turns the ~dozen matrix rebuilds a
+        single genome triggers (and every CPCV variant's) into one construction each."""
         tf = tf or self.primary_tf
+        key = (field_name, tf)
+        cached = self._mat_cache.get(key)
+        if cached is not None:
+            return cached
         cols = {}
         for sym, tfs in self.frames.items():
             df = tfs.get(tf)
             if df is None or df.empty or field_name not in df.columns:
                 continue
             cols[sym] = pd.Series(df[field_name].to_numpy(), index=pd.to_datetime(df["datetime"]))
-        if not cols:
-            return pd.DataFrame()
-        return pd.DataFrame(cols).sort_index()
+        mat = pd.DataFrame(cols).sort_index() if cols else pd.DataFrame()
+        self._mat_cache[key] = mat
+        return mat
 
 
 # ─── lake IO ─────────────────────────────────────────────────────────────

@@ -81,32 +81,29 @@ class Tier1Executor:
         gross = float(genome.sizing.args.get("gross", 1.0))
         per_name_cap = float(genome.sizing.args.get("per_name_cap", 0.10))
 
-        fwd = close.shift(-horizon) / close - 1.0
+        # numpy-vectorized backtest loop (matrix/fwd aligned to close grid; ~20× faster than .loc)
         idx = close.index
-        positions = range(0, len(idx) - horizon, horizon)
+        mat_np = matrix.reindex(index=close.index, columns=close.columns).to_numpy()
+        fwd_np = (close.shift(-horizon) / close - 1.0).to_numpy()
 
         dates, nets, grosses, turns, net_expo, names_traded = [], [], [], [], [], []
         prev_w = None
-        for pos in positions:
-            t = idx[pos]
-            if t not in matrix.index:
-                continue
-            row = matrix.loc[t]
-            fr = fwd.loc[t]
-            valid = fr.notna()
+        for pos in range(0, len(idx) - horizon, horizon):
+            row = mat_np[pos]; fr = fwd_np[pos]
+            valid = np.isfinite(fr)
             if valid.sum() < 4:
                 continue
-            w = self._weights(mode, row.where(valid), top_frac, gross, per_name_cap)
-            if w.abs().sum() == 0:
+            w = self._weights_np(mode, row, valid, top_frac, gross, per_name_cap)
+            if not np.any(w):
                 continue
-            gross_ret = float((w * fr.reindex(w.index)).sum(skipna=True))
-            turnover = float(w.subtract(prev_w, fill_value=0.0).abs().sum()) if prev_w is not None else float(w.abs().sum())
+            gross_ret = float(np.sum(w * np.where(valid, fr, 0.0)))
+            turnover = float(np.abs(w).sum()) if prev_w is None else float(np.abs(w - prev_w).sum())
             nets.append(gross_ret - turnover * cost_per_turnover)
             grosses.append(gross_ret)
             turns.append(turnover)
             net_expo.append(float(w.sum()))
-            names_traded.append(int((w != 0).sum()))
-            dates.append(t)
+            names_traded.append(int(np.count_nonzero(w)))
+            dates.append(idx[pos])
             prev_w = w
 
         if not dates:
@@ -153,26 +150,28 @@ class Tier1Executor:
         return "dense", alpha
 
     # ── weighting ─────────────────────────────────────────────────────────
-    def _weights(self, mode: str, row: pd.Series, top_frac: float, gross: float, per_name_cap: float) -> pd.Series:
-        s = row.dropna()
-        w = pd.Series(0.0, index=row.index)
+    def _weights_np(self, mode: str, row: np.ndarray, valid: np.ndarray,
+                    top_frac: float, gross: float, per_name_cap: float) -> np.ndarray:
+        """Numpy rank-bucket / gated weights for one rebalance row (the hot path)."""
+        w = np.zeros(len(row))
+        finite = valid & np.isfinite(row)
         if mode == "gated":
-            active = s[s != 0]
-            if active.empty:
+            active = finite & (row != 0.0)
+            k = int(active.sum())
+            if k == 0:
                 return w
-            leg = gross / max(1, len(active))
-            w.loc[active.index] = np.sign(active) * leg
-            return w.clip(-per_name_cap, per_name_cap)
+            w[active] = np.sign(row[active]) * (gross / k)
+            return np.clip(w, -per_name_cap, per_name_cap)
         # dense: long top-frac / short bottom-frac, dollar-neutral (engine.rank_bucket_weights)
-        if len(s) < 4:
+        fin_idx = np.where(finite)[0]
+        m = len(fin_idx)
+        if m < 4:
             return w
-        k = max(1, int(len(s) * top_frac))
-        longs = s.nlargest(k).index
-        shorts = s.nsmallest(k).index
-        leg = (gross / 2.0) / k
-        w.loc[longs] = leg
-        w.loc[shorts] = -leg
-        return w.clip(-per_name_cap, per_name_cap)
+        k = max(1, int(m * top_frac))
+        order = fin_idx[np.argsort(row[fin_idx])]        # ascending by alpha
+        w[order[-k:]] = (gross / 2.0) / k                # longs (top)
+        w[order[:k]] = -(gross / 2.0) / k                # shorts (bottom)
+        return np.clip(w, -per_name_cap, per_name_cap)
 
     def _vol_target(self, net: pd.Series, genome: Genome, tf: str, horizon: int) -> pd.Series:
         target = float(genome.sizing.args.get("target_ann_vol", 0.15))

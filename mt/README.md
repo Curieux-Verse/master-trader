@@ -14,8 +14,10 @@ especially the hardest risk, the package-namespace isolation — before deepenin
 
 ```bash
 # 1) build the REAL data lake (once): Binance (crypto, no auth) + OANDA (FX/XAU, key from
-#    FX_Trading/.env) → content-hashed Parquet under var/lake/<snapshot>/
-python -m mt.run_ingest --markets crypto,fx,xau --bars 1500 --snapshot-id real
+#    FX_Trading/.env) → content-hashed Parquet under var/lake/<snapshot>/. The crypto
+#    universe is DYNAMIC — top-N perps by 24h $volume (--top-n, default 50; tokenized
+#    equity/commodity perps filtered out via exchangeInfo underlyingType==COIN).
+python -m mt.run_ingest --markets crypto,fx,xau --top-n 50 --bars 1500 --snapshot-id real
 
 # 2a) THE COMPLETE SYSTEM on REAL data (time-split train/holdout/live, point-in-time)
 python -m mt.run_system --source lake --snapshot-id real --markets crypto,fx,xau
