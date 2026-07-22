@@ -11,8 +11,16 @@ from typing import List
 import numpy as np
 
 from mt.config import MARKETS
-from mt.genome.registry import REGISTRY, ops_for_stage
+from mt.genome.registry import REGISTRY, ops_for_stage, computable_feature_ops
 from mt.genome.schema import Genome, Meta, FeatureNode, SignalSpec, SizingSpec, RiskSpec
+
+
+def available_feeds(market: str) -> set:
+    """Data feeds this market can currently satisfy (thin slice: ohlcv + maybe funding)."""
+    feeds = {"ohlcv"}
+    if MARKETS[market].has_funding:
+        feeds.add("funding_rate")
+    return feeds
 
 
 class TemplateSampler:
@@ -25,12 +33,13 @@ class TemplateSampler:
                     rebalance=m.htf, cost_profile=f"{market}_default")
 
     def _feature_ops(self, market: str) -> List[str]:
-        """Feature ops usable on this market (drop funding on non-funding markets)."""
-        has_funding = MARKETS[market].has_funding
-        ops = [op.name for op in ops_for_stage("feature")]
-        if not has_funding:
-            ops = [o for o in ops if "funding_rate" not in REGISTRY[o].needs]
-        return ops
+        """Computable feature ops whose data_requires this market can satisfy (docs/12 §5).
+
+        Declared-only primitives (e.g. AMT footprint needing `trades`) are registered for
+        planning/typecheck but excluded here so genomes never carry inert features."""
+        feeds = available_feeds(market)
+        return [op.name for op in computable_feature_ops()
+                if all(d in feeds for d in op.data_requires)]
 
     # ─── named archetypes ────────────────────────────────────────────────
     def _archetype(self, market: str, kind: str) -> Genome:

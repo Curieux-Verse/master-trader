@@ -1,11 +1,16 @@
-"""mt.genome.registry — the vetted primitive vocabulary and its argument bounds.
+"""mt.genome.registry — the primitive vocabulary under the full declaration contract.
 
-The registry is what makes randomly-assembled genomes *structurally valid by
-construction*: every op declares its stage, argument ranges, and a sampling prior, so
-generation / mutation / typecheck all share one source of truth (docs/02 §4). This is a
-deliberately small SEED of the vast, open-ended vocabulary docs/02 describes — new
-primitives (SMC detectors via CC_Trading's compute_smc_features, mined factors, LLM
-inventions) are appended here and every engine can use them immediately.
+Implements the docs/11 §1 contract and §8 registration gate: every primitive declares
+typed I/O, bounded args + sampling priors, a point-in-time (PIT) leakage contract,
+`data_requires`, a cost class, tags, and provenance — and is rejected at the door if it is
+untyped, leaky (`uses_future`), unbounded, or unsatisfiable. This is the front-door filter
+that keeps an unbounded, no-privilege space *valid* rather than chaotic; the Gauntlet
+(docs/05) is the back-door filter that keeps conclusions honest.
+
+Breadth policy (docs/11): SMC/ICT is one family among many. `computable=True` primitives
+have a builder in mt.sim.features and flow through the thin slice today (incl. the Auction
+Market Theory proxy subset); `computable=False` ones are *declared* for planning /
+type-checking and light up as their data or wrappers land (see docs/12).
 """
 from __future__ import annotations
 
@@ -15,6 +20,14 @@ from typing import Dict, List, Optional
 
 import numpy as np
 
+# ─── the type system (docs/11 §2) ────────────────────────────────────────
+FEATURE_TYPES = {
+    "Series[price]", "Series[price_level]", "Series[return]", "Series[osc_0_100]",
+    "Series[zscore]", "Series[rank]", "Series[binary]", "Series[categorical]", "Series",
+}
+STAGE_OUTPUT = {"signal": "Signal", "sizing": "Position", "risk": "OrderIntent"}
+STAGES = {"feature", "signal", "sizing", "risk", "meta", "transform"}
+
 
 @dataclass(frozen=True)
 class ArgSpec:
@@ -22,7 +35,7 @@ class ArgSpec:
     kind: str                      # "int" | "float" | "choice" | "bool"
     low: float = 0.0
     high: float = 1.0
-    log: bool = False              # log-uniform sampling (windows)
+    log: bool = False
     choices: tuple = ()
     default: object = None
 
@@ -46,94 +59,204 @@ class ArgSpec:
         return int(round(v)) if self.kind == "int" else float(v)
 
     def mutate(self, v, rng: np.random.Generator):
-        """Perturb one step within bounds (a local nudge, not a resample)."""
         if self.kind in ("choice", "bool"):
             return self.sample(rng)
-        span = (self.high - self.low)
-        step = span * 0.15
+        step = (self.high - self.low) * 0.15
         return self.clamp(v + rng.normal(0.0, step))
+
+    def is_bounded(self) -> bool:
+        if self.kind == "choice":
+            return len(self.choices) > 0
+        if self.kind == "bool":
+            return True
+        return math.isfinite(self.low) and math.isfinite(self.high) and self.high > self.low
+
+
+@dataclass(frozen=True)
+class Pit:
+    """Point-in-time / leakage contract (docs/11 §1). `uses_future` MUST be False."""
+    lookback: object = "= window"
+    uses_future: bool = False
+    closed_bar_only: bool = True
 
 
 @dataclass(frozen=True)
 class OpSpec:
     name: str
-    stage: str                     # "feature" | "signal" | "sizing" | "risk"
+    stage: str
     args: Dict[str, ArgSpec] = field(default_factory=dict)
-    needs: tuple = ()              # data requirements, e.g. ("funding_rate",)
+    output: str = "Series[zscore]"
+    inputs: tuple = ("Series",)
+    data_requires: tuple = ("ohlcv",)
+    cost_class: str = "cheap"       # cheap | medium | heavy
+    tags: tuple = ()
+    pit: Pit = field(default_factory=Pit)
+    provenance: dict = field(default_factory=lambda: {"source": "human", "version": "1.0.0"})
+    computable: bool = False         # True ⇒ a builder exists in mt.sim.features
+    needs: tuple = ()                # back-compat: non-ohlcv feeds (derived if empty)
     doc: str = ""
 
     def sample_args(self, rng: np.random.Generator) -> dict:
         return {k: spec.sample(rng) for k, spec in self.args.items()}
 
 
-# ─── the seed vocabulary ─────────────────────────────────────────────────
+class RegistrationError(ValueError):
+    pass
 
-_FEATURES = [
-    OpSpec("momentum", "feature",
-           {"lookback": ArgSpec("int", 5, 200, log=True, default=84),
-            "skip": ArgSpec("int", 0, 5, default=1)},
-           doc="risk-adjusted price momentum P[t-skip]/P[t-skip-lookback]-1"),
-    OpSpec("reversion", "feature",
-           {"lookback": ArgSpec("int", 1, 20, default=3)},
-           doc="short-horizon mean reversion: negative recent return"),
-    OpSpec("ema_dist", "feature",
-           {"window": ArgSpec("int", 5, 200, log=True, default=50)},
-           doc="distance of close from its EMA, in ATR units"),
-    OpSpec("rsi", "feature",
-           {"window": ArgSpec("int", 5, 50, default=14)},
-           doc="Wilder RSI, centered to [-1,1]"),
-    OpSpec("realized_vol", "feature",
-           {"window": ArgSpec("int", 5, 120, log=True, default=48)},
-           doc="rolling realized volatility (negated: prefer calmer names)"),
-    OpSpec("breakout", "feature",
-           {"window": ArgSpec("int", 10, 120, log=True, default=55)},
-           doc="Donchian breakout distance in ATR units"),
-    OpSpec("atr_pct", "feature",
-           {}, doc="ATR / close (volatility feature; already in the frame)"),
-    OpSpec("funding_z", "feature",
-           {"window": ArgSpec("int", 8, 200, log=True, default=72)},
-           needs=("funding_rate",),
-           doc="funding-rate z-score (crypto perps) — contrarian to crowded funding"),
-]
 
-_SIGNALS = [
-    OpSpec("weighted_blend", "signal",
-           {"direction": ArgSpec("choice", choices=("long_bias", "short_bias", "neutral"),
-                                 default="neutral")},
-           doc="row z-score sum of features (the honest v1 blend)"),
-    OpSpec("gated_and", "signal",
-           {"threshold": ArgSpec("float", 0.0, 2.0, default=0.5),
-            "direction": ArgSpec("choice", choices=("long_bias", "short_bias"),
-                                  default="long_bias")},
-           doc="long/short only where every feature clears a z-threshold"),
-]
+def _validate(op: OpSpec) -> None:
+    """The registration gate (docs/11 §8) — reject before it can poison a genome."""
+    if op.stage not in STAGES:
+        raise RegistrationError(f"{op.name}: unknown stage {op.stage!r}")
+    if op.pit.uses_future:
+        raise RegistrationError(f"{op.name}: uses_future=True is never allowed (leakage)")
+    if op.stage in ("feature", "transform") and op.output not in FEATURE_TYPES:
+        raise RegistrationError(f"{op.name}: unknown output type {op.output!r}")
+    if op.stage in STAGE_OUTPUT and op.output != STAGE_OUTPUT[op.stage]:
+        raise RegistrationError(f"{op.name}: {op.stage} op must output {STAGE_OUTPUT[op.stage]}")
+    for k, spec in op.args.items():
+        if not spec.is_bounded():
+            raise RegistrationError(f"{op.name}: arg {k!r} is unbounded")
+    if not op.data_requires:
+        raise RegistrationError(f"{op.name}: empty data_requires")
 
-_SIZING = [
-    OpSpec("rank_bucket", "sizing",
-           {"top_frac": ArgSpec("float", 0.05, 0.30, default=0.10),
-            "gross": ArgSpec("float", 0.5, 2.0, default=1.0),
-            "per_name_cap": ArgSpec("float", 0.02, 0.20, default=0.10)},
-           doc="long top-frac / short bottom-frac, dollar-neutral, capped"),
-    OpSpec("vol_target", "sizing",
-           {"target_ann_vol": ArgSpec("float", 0.05, 0.40, default=0.15),
-            "top_frac": ArgSpec("float", 0.05, 0.30, default=0.10),
-            "per_name_cap": ArgSpec("float", 0.02, 0.20, default=0.10)},
-           doc="rank bucket scaled to a target annualized volatility"),
-]
 
-_RISK = [
-    OpSpec("horizon_hold", "risk",
-           {"horizon": ArgSpec("int", 1, 48, log=True, default=6),
-            "cost_stress": ArgSpec("float", 1.0, 1.0, default=1.0)},
-           doc="non-overlapping holding horizon (bars); cost_stress multiplies costs"),
-]
+REGISTRY: Dict[str, OpSpec] = {}
 
-REGISTRY: Dict[str, OpSpec] = {op.name: op for op in (_FEATURES + _SIGNALS + _SIZING + _RISK)}
+
+def register(op: OpSpec) -> OpSpec:
+    _validate(op)
+    # back-compat: keep `needs` = required feeds beyond ohlcv (funding detection etc.)
+    if not op.needs:
+        object.__setattr__(op, "needs", tuple(d for d in op.data_requires if d != "ohlcv"))
+    REGISTRY[op.name] = op
+    return op
 
 
 def ops_for_stage(stage: str) -> List[OpSpec]:
     return [op for op in REGISTRY.values() if op.stage == stage]
 
 
+def computable_feature_ops() -> List[OpSpec]:
+    return [op for op in REGISTRY.values() if op.stage == "feature" and op.computable]
+
+
 def get(name: str) -> Optional[OpSpec]:
     return REGISTRY.get(name)
+
+
+def _win(default, lo=5, hi=200):
+    return ArgSpec("int", lo, hi, log=True, default=default)
+
+
+# ═══ SEED VOCABULARY ══════════════════════════════════════════════════════
+# Registered through the gate. Grouped by catalog family (docs/11 §3).
+
+# ── 3.3 momentum / 3.1 return / 3.2 trend / 3.4 vol / classical (computable) ──
+register(OpSpec("momentum", "feature", {"lookback": _win(84), "skip": ArgSpec("int", 0, 5, default=1)},
+                output="Series[zscore]", cost_class="cheap", tags=("momentum", "classical_ta"),
+                computable=True, doc="risk-adjusted price momentum"))
+register(OpSpec("reversion", "feature", {"lookback": ArgSpec("int", 1, 20, default=3)},
+                output="Series[return]", tags=("mean_reversion",), computable=True,
+                doc="short-horizon mean reversion"))
+register(OpSpec("ema_dist", "feature", {"window": _win(50)}, output="Series[zscore]",
+                tags=("trend", "classical_ta"), computable=True, doc="close distance from EMA in ATR"))
+register(OpSpec("rsi", "feature", {"window": ArgSpec("int", 5, 50, default=14)},
+                output="Series[osc_0_100]", tags=("momentum", "oscillator"), computable=True))
+register(OpSpec("realized_vol", "feature", {"window": _win(48, 5, 120)}, output="Series[return]",
+                tags=("volatility",), computable=True, doc="rolling realized vol (negated)"))
+register(OpSpec("breakout", "feature", {"window": _win(55, 10, 120)}, output="Series[zscore]",
+                tags=("breakout", "pattern"), computable=True, doc="Donchian breakout distance in ATR"))
+register(OpSpec("atr_pct", "feature", {}, output="Series[return]", tags=("volatility",),
+                computable=True, pit=Pit(lookback=14), doc="ATR/close (low-vol tilt)"))
+
+# ── 3.6 microstructure / order flow ──
+register(OpSpec("funding_z", "feature", {"window": _win(72, 8, 200)}, output="Series[zscore]",
+                data_requires=("ohlcv", "funding_rate"), cost_class="medium",
+                tags=("microstructure", "funding", "crypto"), computable=True,
+                doc="funding-rate z-score (contrarian to crowded funding)"))
+register(OpSpec("order_flow_imbalance", "feature", {"window": _win(48, 5, 200)}, output="Series[zscore]",
+                data_requires=("trades",), cost_class="medium", tags=("microstructure", "order_flow"),
+                computable=False, doc="aggressive buy−sell imbalance (needs trades)"))
+
+# ── 3.15 Auction Market Theory & order flow (AMT proxies computable; footprint declared) ──
+register(OpSpec("dist_to_poc", "feature", {"window": _win(60, 20, 240)}, output="Series[zscore]",
+                cost_class="medium", tags=("auction_market_theory", "volume_profile"), computable=True,
+                doc="distance to developing volume POC in ATR (proxy)"))
+register(OpSpec("value_area_position", "feature", {"window": _win(60, 20, 240)}, output="Series[categorical]",
+                cost_class="medium", tags=("auction_market_theory", "market_profile"), computable=True,
+                doc="above / inside / below the developing value area (proxy)"))
+register(OpSpec("cumulative_delta", "feature", {"window": _win(48, 10, 200)}, output="Series[zscore]",
+                cost_class="medium", tags=("auction_market_theory", "order_flow"), computable=True,
+                doc="cumulative volume delta via close-location proxy (extends cvd)"))
+register(OpSpec("delta_divergence", "feature", {"window": ArgSpec("int", 5, 60, default=14)},
+                output="Series[zscore]", cost_class="medium", tags=("auction_market_theory", "order_flow"),
+                computable=True, doc="price up / delta down → absorption warning (proxy)"))
+register(OpSpec("rotation_factor", "feature", {"window": ArgSpec("int", 5, 60, default=20)},
+                output="Series[zscore]", cost_class="cheap", tags=("auction_market_theory",),
+                computable=True, doc="TPO up/down rotation count proxy"))
+register(OpSpec("stacked_imbalance", "feature", {"n_levels": ArgSpec("int", 2, 6, default=3)},
+                output="Series[binary]", data_requires=("trades",), cost_class="heavy",
+                tags=("auction_market_theory", "order_flow", "footprint"), computable=False,
+                doc="consecutive lopsided footprint levels (needs trades)"))
+register(OpSpec("absorption", "feature", {"window": ArgSpec("int", 3, 50, default=10)},
+                output="Series[binary]", data_requires=("trades",), cost_class="heavy",
+                tags=("auction_market_theory", "order_flow", "footprint"), computable=False,
+                doc="large passive fills halting price (needs trades)"))
+
+# ── other families: declared-only, to show the contract's breadth (docs/12 §2) ──
+register(OpSpec("hurst", "feature", {"window": _win(120, 40, 400)}, output="Series[zscore]",
+                cost_class="heavy", tags=("statistical", "persistence"), computable=False,
+                doc="Hurst exponent (compute pending)"))
+register(OpSpec("candlestick_pattern", "feature",
+                {"pattern": ArgSpec("choice", choices=("engulfing", "pin", "doji", "inside"), default="engulfing")},
+                output="Series[binary]", tags=("pattern",), computable=False))
+register(OpSpec("order_block_strength", "feature",
+                {"tf": ArgSpec("choice", choices=("htf", "mtf", "ltf"), default="htf")},
+                output="Series[osc_0_100]", cost_class="medium", tags=("smc", "ict"), computable=False,
+                doc="0–7 OB strength — wraps concepts/ via compute_smc_features (pending)"))
+register(OpSpec("rolling_corr", "feature",
+                {"symbol": ArgSpec("choice", choices=("DXY", "XAU", "SPX", "BTC.D", "US10Y"), default="DXY"),
+                 "window": _win(60, 20, 200)},
+                output="Series[zscore]", data_requires=("cross_asset",), cost_class="medium",
+                tags=("cross_asset", "intermarket"), computable=False))
+register(OpSpec("cot_zscore", "feature",
+                {"report": ArgSpec("choice", choices=("legacy", "TFF"), default="TFF")},
+                output="Series[zscore]", data_requires=("cot",), cost_class="cheap",
+                tags=("macro", "positioning"), computable=False))
+register(OpSpec("news_sentiment", "feature", {"window": _win(24, 4, 168)}, output="Series[zscore]",
+                data_requires=("news",), cost_class="medium", tags=("sentiment", "macro"), computable=False))
+register(OpSpec("vol_regime_tag", "feature", {"tiers": ArgSpec("int", 3, 5, default=4)},
+                output="Series[categorical]", data_requires=("model",), cost_class="heavy",
+                tags=("regime", "ml_derived"), computable=False,
+                doc="calm/normal/high/extreme — feature produced by a model (P4)"))
+
+# ── §4 signal ops ──
+register(OpSpec("weighted_blend", "signal",
+                {"direction": ArgSpec("choice", choices=("long_bias", "short_bias", "neutral"), default="neutral")},
+                output="Signal", inputs=("Series[zscore]",), tags=("blend",), computable=True,
+                doc="row z-score sum of features"))
+register(OpSpec("gated_and", "signal",
+                {"threshold": ArgSpec("float", 0.0, 2.0, default=0.5),
+                 "direction": ArgSpec("choice", choices=("long_bias", "short_bias"), default="long_bias")},
+                output="Signal", inputs=("Series[zscore]",), tags=("logic", "gate"), computable=True,
+                doc="long/short only where every feature clears a z-threshold"))
+
+# ── §5 sizing ops ──
+register(OpSpec("rank_bucket", "sizing",
+                {"top_frac": ArgSpec("float", 0.05, 0.30, default=0.10),
+                 "gross": ArgSpec("float", 0.5, 2.0, default=1.0),
+                 "per_name_cap": ArgSpec("float", 0.02, 0.20, default=0.10)},
+                output="Position", inputs=("Signal",), tags=("cross_sectional",), computable=True))
+register(OpSpec("vol_target", "sizing",
+                {"target_ann_vol": ArgSpec("float", 0.05, 0.40, default=0.15),
+                 "top_frac": ArgSpec("float", 0.05, 0.30, default=0.10),
+                 "per_name_cap": ArgSpec("float", 0.02, 0.20, default=0.10)},
+                output="Position", inputs=("Signal",), tags=("vol_target",), computable=True))
+
+# ── §6 risk overlays ──
+register(OpSpec("horizon_hold", "risk",
+                {"horizon": ArgSpec("int", 1, 48, log=True, default=6),
+                 "cost_stress": ArgSpec("float", 1.0, 2.0, default=1.0)},
+                output="OrderIntent", inputs=("Position",), tags=("holding",), computable=True,
+                doc="non-overlapping holding horizon; cost_stress multiplies costs"))

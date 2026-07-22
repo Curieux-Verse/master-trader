@@ -23,6 +23,8 @@ The design goal, stated plainly: **make the *research process* the edge — not 
 | 08 | [Infrastructure & Data](docs/08_INFRASTRUCTURE_AND_DATA.md) | The zero-cost stack: data feeds, storage, orchestration, compute. |
 | 09 | [Research Roadmap](docs/09_RESEARCH_ROADMAP.md) | Phased build plan with milestones and go/no-go gates. |
 | 10 | [Integration Map](docs/10_INTEGRATION_MAP.md) | Exactly how this reuses your existing CC_Trading / xsec / SMC_ML / scanners. |
+| 11 | [Primitive Catalog](docs/11_PRIMITIVE_CATALOG.md) | The full open-ended registry of features/indicators/operators the generators pull from — ~16 families incl. Auction Market Theory. |
+| 12 | [Primitive Implementation Plan](docs/12_PRIMITIVE_IMPLEMENTATION_PLAN.md) | How the catalog gets built: every family → data → seed code → cost → phase. |
 | — | [References](docs/REFERENCES.md) | Papers and the specific claims each one backs. |
 
 ---

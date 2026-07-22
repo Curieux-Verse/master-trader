@@ -13,7 +13,10 @@ import pytest
 
 from mt.data.panel import NormPanel
 from mt.genome.schema import Genome, Meta, FeatureNode, SignalSpec, SizingSpec, RiskSpec
-from mt.genome.registry import REGISTRY, ops_for_stage
+from mt.genome.registry import (
+    REGISTRY, ops_for_stage, computable_feature_ops, register, OpSpec, ArgSpec, Pit, RegistrationError,
+)
+from mt.sim import features as F
 from mt.genome.ops import mutate, crossover, distance
 from mt.sim import Tier1Executor
 from mt.gauntlet import Gauntlet
@@ -132,6 +135,47 @@ def test_archive_occupy_replace_keep(tmp_path):
     assert store.upsert_archive("n1", "b", "crypto", {}, {}, scalar_fit=2.0) == "replace"
     assert store.upsert_archive("n1", "c", "crypto", {}, {}, scalar_fit=0.5) == "keep"
     store.close()
+
+
+def test_every_computable_feature_has_a_builder():
+    # the contract's promise: computable=True ⇒ mt.sim.features can actually compute it
+    for op in computable_feature_ops():
+        assert op.name in F.BUILDERS, f"{op.name} marked computable but has no builder"
+
+
+def test_registration_gate_rejects_leaky_and_unbounded():
+    with pytest.raises(RegistrationError):
+        register(OpSpec("leaky_op", "feature", {}, pit=Pit(uses_future=True)))
+    with pytest.raises(RegistrationError):
+        register(OpSpec("unbounded_op", "feature", {"w": ArgSpec("float", 1.0, 1.0)}))
+    with pytest.raises(RegistrationError):
+        register(OpSpec("mistyped_op", "feature", {}, output="NotAType"))
+
+
+def test_amt_primitives_flow_through_executor():
+    # Auction Market Theory proxies must compute and drive a real backtest end-to-end
+    g = Genome(
+        meta=Meta(market="crypto", htf="4h"),
+        features=[FeatureNode("f1", "dist_to_poc", {"window": 60}),
+                  FeatureNode("f2", "cumulative_delta", {"window": 48}),
+                  FeatureNode("f3", "value_area_position", {"window": 60})],
+        signal=SignalSpec("weighted_blend", {"direction": "neutral"}),
+        sizing=SizingSpec("rank_bucket", {"top_frac": 0.2, "gross": 1.0, "per_name_cap": 0.15}),
+        risk=RiskSpec("horizon_hold", {"horizon": 6, "cost_stress": 1.0}),
+    )
+    assert g.typecheck()[0]
+    res = Tier1Executor(seed=7).evaluate(g, _panel())
+    assert res.ok and res.summary["n_periods"] > 0
+
+
+def test_declared_only_primitive_is_not_sampled():
+    # AMT footprint (needs trades) is registered for planning but never wired by the generator
+    from mt.generators.templates import TemplateSampler
+    ops_used = set()
+    for g in TemplateSampler(seed=1).sample("crypto", n_random=20):
+        ops_used.update(f.op for f in g.features)
+    assert "stacked_imbalance" not in ops_used and "absorption" not in ops_used
+    assert REGISTRY["stacked_imbalance"].computable is False
 
 
 if __name__ == "__main__":

@@ -93,9 +93,82 @@ def funding_z(panel: NormPanel, args: dict, tf: str) -> pd.DataFrame:
     return -((fr - mu) / sd)                        # contrarian to crowded funding
 
 
+# ─── Auction Market Theory & order-flow proxies (docs/11 §3.15) ──────────
+# Bar-derivable proxies; the true footprint versions activate once trades/aggTrades
+# are in the lake (docs/12 §3). Not privileged — they compete in the Gauntlet like any op.
+
+def _clv_delta(panel: NormPanel, tf: str) -> pd.DataFrame:
+    """Per-bar signed volume via close-location value in [-1,1] × volume (delta proxy)."""
+    close = _close(panel, tf)
+    high = panel.field_matrix("high", tf).reindex_like(close)
+    low = panel.field_matrix("low", tf).reindex_like(close)
+    vol = panel.field_matrix("volume", tf).reindex_like(close)
+    rng = (high - low).replace(0, np.nan)
+    clv = (2 * (close - low) / rng - 1.0)          # +1 close-on-high, -1 close-on-low
+    return clv * vol
+
+
+def dist_to_poc(panel: NormPanel, args: dict, tf: str) -> pd.DataFrame:
+    """Distance of price to the developing volume Point of Control, in ATR (proxy: VWAP)."""
+    w = int(args.get("window", 60))
+    close = _close(panel, tf)
+    vol = panel.field_matrix("volume", tf).reindex_like(close)
+    atr = panel.field_matrix("atr_14", tf).reindex_like(close)
+    num = (close * vol).rolling(w, min_periods=max(3, w // 3)).sum()
+    den = vol.rolling(w, min_periods=max(3, w // 3)).sum().replace(0, np.nan)
+    poc = num / den
+    return (close - poc) / atr.replace(0, np.nan)
+
+
+def value_area_position(panel: NormPanel, args: dict, tf: str) -> pd.DataFrame:
+    """Above (+1) / inside (0) / below (-1) the developing value area (proxy: VWAP±1σ)."""
+    w = int(args.get("window", 60))
+    close = _close(panel, tf)
+    vol = panel.field_matrix("volume", tf).reindex_like(close)
+    num = (close * vol).rolling(w, min_periods=max(3, w // 3)).sum()
+    den = vol.rolling(w, min_periods=max(3, w // 3)).sum().replace(0, np.nan)
+    vwap = num / den
+    sd = close.rolling(w, min_periods=max(3, w // 3)).std().replace(0, np.nan)
+    pos = (close - vwap) / sd
+    return pos.clip(-1, 1).where(pos.abs() > 1, 0.0).apply(np.sign)
+
+
+def cumulative_delta(panel: NormPanel, args: dict, tf: str) -> pd.DataFrame:
+    """Normalized cumulative volume delta over a window, in [-1,1] (extends cvd)."""
+    w = int(args.get("window", 48))
+    delta = _clv_delta(panel, tf)
+    vol = panel.field_matrix("volume", tf).reindex_like(delta)
+    ds = delta.rolling(w, min_periods=max(3, w // 3)).sum()
+    vs = vol.rolling(w, min_periods=max(3, w // 3)).sum().replace(0, np.nan)
+    return ds / vs
+
+
+def delta_divergence(panel: NormPanel, args: dict, tf: str) -> pd.DataFrame:
+    """Price up while delta down (or vice-versa) → absorption warning (proxy)."""
+    w = int(args.get("window", 14))
+    close = _close(panel, tf)
+    cd = cumulative_delta(panel, {"window": w}, tf)
+    pc = close.diff(w)
+    return -(np.sign(pc) * cd)                      # +ve when price and delta disagree
+
+
+def rotation_factor(panel: NormPanel, args: dict, tf: str) -> pd.DataFrame:
+    """TPO up/down rotation proxy over a window, normalized to [-1,1]."""
+    w = int(args.get("window", 20))
+    close = _close(panel, tf)
+    up = (close.diff() > 0).astype(float)
+    down = (close.diff() < 0).astype(float)
+    return (up.rolling(w, min_periods=max(3, w // 3)).sum()
+            - down.rolling(w, min_periods=max(3, w // 3)).sum()) / w
+
+
 BUILDERS: Dict[str, Callable[[NormPanel, dict, str], pd.DataFrame]] = {
     "momentum": momentum, "reversion": reversion, "ema_dist": ema_dist, "rsi": rsi,
     "realized_vol": realized_vol, "breakout": breakout, "atr_pct": atr_pct, "funding_z": funding_z,
+    # AMT / order-flow proxies
+    "dist_to_poc": dist_to_poc, "value_area_position": value_area_position,
+    "cumulative_delta": cumulative_delta, "delta_divergence": delta_divergence,
+    "rotation_factor": rotation_factor,
 }
 
 

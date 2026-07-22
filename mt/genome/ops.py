@@ -11,7 +11,7 @@ from typing import List
 
 import numpy as np
 
-from mt.genome.registry import REGISTRY, ops_for_stage
+from mt.genome.registry import REGISTRY, ops_for_stage, computable_feature_ops
 from mt.genome.schema import Genome, FeatureNode, SignalSpec, SizingSpec, RiskSpec
 
 
@@ -39,11 +39,11 @@ def mutate(g: Genome, rng: np.random.Generator) -> Genome:
             f.args[k] = spec.args[k].mutate(f.args.get(k, spec.args[k].default), rng)
     elif move == "swap_feature" and child.features:
         f = child.features[int(rng.integers(len(child.features)))]
-        new_op = ops_for_stage("feature")[int(rng.integers(len(ops_for_stage("feature"))))]
+        new_op = computable_feature_ops()[int(rng.integers(len(computable_feature_ops())))]
         f.op = new_op.name
         f.args = new_op.sample_args(rng)
     elif move == "add_feature":
-        new_op = ops_for_stage("feature")[int(rng.integers(len(ops_for_stage("feature"))))]
+        new_op = computable_feature_ops()[int(rng.integers(len(computable_feature_ops())))]
         child.features.append(FeatureNode(_new_feature_id(child.features), new_op.name, new_op.sample_args(rng)))
     elif move == "remove_feature":
         del child.features[int(rng.integers(len(child.features)))]
