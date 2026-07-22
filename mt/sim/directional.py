@@ -137,7 +137,8 @@ class Tier2Executor:
         curve = net.cumsum()
         return {
             "n_periods": int(len(net)), "n_trades": int(len(net)),
-            "net_sharpe": sharpe, "ann_return": mean * tpy,
+            "net_sharpe": sharpe, "sharpe_pp": (mean / sd) if sd > 0 else float("nan"),
+            "ann_return": mean * tpy,
             "ann_vol": sd * np.sqrt(tpy),
             "max_dd": float((curve.cummax() - curve).max()) if len(curve) else float("nan"),
             "hit_rate": float((net > 0).mean()), "avg_trade_ret": mean,

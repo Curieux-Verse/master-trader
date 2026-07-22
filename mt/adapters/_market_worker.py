@@ -50,7 +50,8 @@ def _base_price(market_kind: str, symbol: str) -> float:
     return 0.8 + 1.0 * r                             # fx ~0.8..1.8
 
 
-def _synth_frame(symbol: str, tf: str, bars: int, seed: int, kind: str, has_funding: bool) -> pd.DataFrame:
+def _synth_frame(symbol: str, tf: str, bars: int, seed: int, kind: str, has_funding: bool,
+                 structure: float = 0.0) -> pd.DataFrame:
     rng = np.random.default_rng(_seed_int(seed, symbol, tf))
     minutes = _tf_minutes(tf)
     # per-bar vol scaled from an ~annual vol so different tfs are self-consistent
@@ -58,7 +59,20 @@ def _synth_frame(symbol: str, tf: str, bars: int, seed: int, kind: str, has_fund
     bars_per_year = 525600.0 / minutes
     sigma = ann_vol / np.sqrt(bars_per_year)
     drift = -0.5 * sigma ** 2
-    rets = rng.normal(drift, sigma, size=bars)
+    noise = rng.normal(0.0, sigma, size=bars)
+    if structure > 0.0:
+        # LABELED synthetic edge: persistent per-symbol drift + mild momentum (AR on noise),
+        # so the discovery machine has genuine (planted) structure to find and validate.
+        srng = np.random.default_rng(_seed_int(seed, symbol, "structure"))
+        mu = float(srng.normal(0.0, 0.30 * structure * sigma))   # persistent drift, scaled to σ
+        phi = 0.18 * structure                                    # momentum (AR on noise)
+        rets = np.empty(bars)
+        prev = 0.0
+        for t in range(bars):
+            rets[t] = drift + mu + phi * prev + noise[t]
+            prev = noise[t]
+    else:
+        rets = drift + noise
     price = _base_price(kind, symbol) * np.exp(np.cumsum(rets))
 
     # OHLC around the close path
@@ -122,7 +136,8 @@ def main() -> None:
     for sym in task["symbols"]:
         for tf in tfs:
             df = _synth_frame(sym, tf, int(task.get("bars", 400)), int(task.get("seed", 4242)),
-                              kind, bool(task.get("has_funding", False)))
+                              kind, bool(task.get("has_funding", False)),
+                              structure=float(task.get("structure", 0.0)))
             path = os.path.join(out_dir, f"{_escape(sym)}__{tf}.parquet")
             df.to_parquet(path, index=False)
             frames_meta.append({"symbol": sym, "tf": tf, "path": os.path.abspath(path), "rows": int(len(df))})

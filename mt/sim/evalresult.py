@@ -43,6 +43,7 @@ class EvalResult:
             "snapshot_id": self.snapshot_id,
             "n_periods": int(self.summary.get("n_periods", 0)),
             "net_sharpe": _f(self.summary.get("net_sharpe")),
+            "sharpe_pp": _f(self.summary.get("sharpe_pp")),
             "ann_return": _f(self.summary.get("ann_return")),
             "max_dd": _f(self.summary.get("max_dd")),
             "hit_rate": _f(self.summary.get("hit_rate")),

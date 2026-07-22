@@ -21,10 +21,11 @@ class GauntletContext:
     eval_fn: Optional[Callable] = None            # (genome, panel) -> EvalResult
     panel: object = None                          # the search panel (for CPCV variants)
     holdout_panel: object = None                  # locked, unseen (for transfer)
-    archive_returns: Dict = field(default_factory=dict)   # genome_id -> return array
+    archive_returns: Dict = field(default_factory=dict)   # niche -> return array (for orthogonality)
     seed: int = 4242
-    cpcv_variants: int = 6
-    cpcv_groups: int = 8
+    sr_trial_std: Optional[float] = None                  # ledger σ_SR for the DSR deflation
+    cpcv_variants: int = 4
+    cpcv_groups: int = 6
 
 
 @dataclass
@@ -58,9 +59,10 @@ class Gauntlet:
         seed = ctx.seed if ctx else res.seed
 
         # cheap → expensive (all enforced; first failure short-circuits the rest)
+        sr_std = ctx.sr_trial_std if ctx else None
         ordered = [
             G.g1_sanity(net),
-            G.g4_deflated_sharpe(net, trial_count, ann_factor=ppy),
+            G.g4_deflated_sharpe(net, trial_count, ann_factor=ppy, sr_trial_std=sr_std),
             G.g5_robustness(net, seed=seed),
             G.g2_oos_degradation(net),
             G.g7_capacity(genome, res, ctx),

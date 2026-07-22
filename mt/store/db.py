@@ -38,6 +38,7 @@ CREATE TABLE IF NOT EXISTS result_ledger (
     snapshot_id  TEXT,
     n_periods    INTEGER,
     net_sharpe   REAL,
+    sharpe_pp    REAL,
     ann_return   REAL,
     max_dd       REAL,
     hit_rate     REAL,
@@ -110,14 +111,30 @@ class MTStore:
         row = res.to_ledger_row()
         cur = self.conn.execute(
             "INSERT INTO result_ledger(genome_id,market,fidelity,seed,snapshot_id,n_periods,"
-            "net_sharpe,ann_return,max_dd,hit_rate,avg_turnover,error,created_at)"
-            " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "net_sharpe,sharpe_pp,ann_return,max_dd,hit_rate,avg_turnover,error,created_at)"
+            " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (row["genome_id"], row["market"], row["fidelity"], row["seed"], row["snapshot_id"],
-             row["n_periods"], row["net_sharpe"], row["ann_return"], row["max_dd"], row["hit_rate"],
-             row["avg_turnover"], row["error"], time.time()),
+             row["n_periods"], row["net_sharpe"], row.get("sharpe_pp"), row["ann_return"], row["max_dd"],
+             row["hit_rate"], row["avg_turnover"], row["error"], time.time()),
         )
         self.conn.commit()
         return cur.lastrowid
+
+    def sr_trial_std(self, market: Optional[str] = None) -> Optional[float]:
+        """Std of per-observation Sharpes across trials — the σ_SR that scales the Deflated
+        Sharpe deflation (docs/05 §3). None until enough finite trials exist."""
+        q = "SELECT sharpe_pp FROM result_ledger WHERE sharpe_pp IS NOT NULL"
+        params: tuple = ()
+        if market:
+            q += " AND market=?"; params = (market,)
+        vals = [r[0] for r in self.conn.execute(q, params).fetchall() if r[0] is not None]
+        import math
+        vals = [v for v in vals if math.isfinite(v)]
+        if len(vals) < 8:
+            return None
+        import statistics
+        s = statistics.pstdev(vals)
+        return float(s) if s > 0 else None
 
     def trial_count(self, market: Optional[str] = None) -> int:
         """The Deflated-Sharpe family size N: every eval ever recorded (docs/05 §3)."""
@@ -163,7 +180,18 @@ class MTStore:
         return list(self.conn.execute("SELECT * FROM archive ORDER BY scalar_fit DESC"))
 
     # ─── Lessons (thin) ──────────────────────────────────────────────────
-    def add_lesson(self, text: str, tags: str = "") -> None:
+    def add_lesson(self, text: str, tags: str = "") -> bool:
+        """Append a lesson, deduplicated by exact text. Returns True if newly added."""
+        if self.conn.execute("SELECT 1 FROM lessons WHERE text=?", (text,)).fetchone():
+            return False
         self.conn.execute("INSERT INTO lessons(text,tags,created_at) VALUES(?,?,?)",
                           (text, tags, time.time()))
         self.conn.commit()
+        return True
+
+    def lesson_count(self) -> int:
+        return self.conn.execute("SELECT COUNT(*) FROM lessons").fetchone()[0]
+
+    def recent_lessons(self, limit: int = 8) -> List[str]:
+        rows = self.conn.execute("SELECT text FROM lessons ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
+        return [r[0] for r in rows]

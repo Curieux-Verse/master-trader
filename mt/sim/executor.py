@@ -193,6 +193,7 @@ class Tier1Executor:
         return {
             "n_periods": int(len(net)),
             "net_sharpe": sharpe,
+            "sharpe_pp": (mean / sd) if sd > 0 else float("nan"),   # per-observation (for ledger σ_SR)
             "ann_return": mean * ppy,
             "ann_vol": sd * np.sqrt(ppy),
             "max_dd": max_dd,

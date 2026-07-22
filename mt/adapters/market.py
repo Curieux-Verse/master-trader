@@ -40,8 +40,11 @@ class MarketAdapter:
 
     def build_panel(self, *, bars: int = 400, seed: int = DEFAULT_SEED,
                     snapshot_id: str = DATA_SNAPSHOT_ID, symbols: Optional[list] = None,
-                    timeout: float = 120.0) -> NormPanel:
-        """Run the isolated worker and load the resulting NormPanel from the lake."""
+                    structure: float = 0.0, timeout: float = 120.0) -> NormPanel:
+        """Run the isolated worker and load the resulting NormPanel from the lake.
+
+        `structure` (0..1) injects a LABELED synthetic edge (persistent drift + momentum) so
+        the discovery loop has genuine planted structure to find; 0 = pure random walk."""
         tfs = self._timeframes()
         out_dir = LAKE_DIR / snapshot_id / self.market.name
         task = {
@@ -54,6 +57,7 @@ class MarketAdapter:
             "seed": seed,
             "snapshot_id": snapshot_id,
             "has_funding": self.market.has_funding,
+            "structure": float(structure),
             "out_dir": str(out_dir),
         }
         manifest = self._run_worker(task, timeout)
