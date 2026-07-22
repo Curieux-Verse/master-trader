@@ -11,6 +11,6 @@ on real data. Free sources, no ccxt:
 read Parquet, never the API. Bulk daily/monthly dumps (deep history + survivorship) are the
 natural next extension on top of this REST baseline.
 """
-from mt.ingest.lake import ingest_market, enrich_footprint, IngestResult
+from mt.ingest.lake import ingest_market, enrich_footprint, enrich_macro, IngestResult
 
-__all__ = ["ingest_market", "enrich_footprint", "IngestResult"]
+__all__ = ["ingest_market", "enrich_footprint", "enrich_macro", "IngestResult"]

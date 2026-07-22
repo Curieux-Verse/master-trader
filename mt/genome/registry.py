@@ -272,11 +272,11 @@ register(OpSpec("hurst", "feature", {"window": _win(120, 40, 400)}, output="Seri
                 doc="persistence proxy: 0.5 + 0.5·lag-1 autocorr of returns"))
 register(OpSpec("candlestick_pattern", "feature",
                 {"pattern": ArgSpec("choice", choices=("engulfing", "pin", "doji", "inside"), default="engulfing")},
-                output="Series[binary]", tags=("pattern",), computable=False))
-register(OpSpec("order_block_strength", "feature",
-                {"tf": ArgSpec("choice", choices=("htf", "mtf", "ltf"), default="htf")},
-                output="Series[osc_0_100]", cost_class="medium", tags=("smc", "ict"), computable=False,
-                doc="0–7 OB strength — wraps concepts/ via compute_smc_features (pending)"))
+                output="Series[categorical]", tags=("pattern",), computable=True,
+                doc="signed candlestick pattern flag"))
+register(OpSpec("order_block_strength", "feature", {}, output="Series[zscore]", cost_class="medium",
+                tags=("smc", "ict"), computable=True,
+                doc="net recent displacement-after-opposite-candle pressure (SMC OB proxy, ATR)"))
 register(OpSpec("rolling_corr", "feature", {"window": _win(60, 20, 200)},
                 output="Series[zscore]", data_requires=("cross_asset",), cost_class="medium",
                 tags=("cross_asset", "intermarket"), computable=True,
@@ -290,16 +290,17 @@ register(OpSpec("fvg_gap", "feature", {}, output="Series[zscore]", cost_class="m
 register(OpSpec("liquidity_sweep", "feature", {"window": _win(20, 8, 100)}, output="Series[categorical]",
                 cost_class="medium", tags=("smc", "ict"), computable=True,
                 doc="swept-then-reclaim of a prior swing extreme (stop run)"))
-register(OpSpec("cot_zscore", "feature",
-                {"report": ArgSpec("choice", choices=("legacy", "TFF"), default="TFF")},
+register(OpSpec("cot_zscore", "feature", {"window": _win(26, 4, 104)},
                 output="Series[zscore]", data_requires=("cot",), cost_class="cheap",
-                tags=("macro", "positioning"), computable=False))
+                tags=("macro", "positioning"), computable=True,
+                doc="CFTC COT net-positioning z-score (from enriched cot_z column)"))
 register(OpSpec("news_sentiment", "feature", {"window": _win(24, 4, 168)}, output="Series[zscore]",
-                data_requires=("news",), cost_class="medium", tags=("sentiment", "macro"), computable=False))
+                data_requires=("news",), cost_class="medium", tags=("sentiment", "macro"), computable=True,
+                doc="GDELT news tone (from enriched news_tone column)"))
 register(OpSpec("vol_regime_tag", "feature", {"tiers": ArgSpec("int", 3, 5, default=4)},
-                output="Series[categorical]", data_requires=("model",), cost_class="heavy",
-                tags=("regime", "ml_derived"), computable=False,
-                doc="calm/normal/high/extreme — feature produced by a model (P4)"))
+                output="Series[zscore]", cost_class="medium",
+                tags=("regime", "ml_derived"), computable=True,
+                doc="volatility-regime percentile in [-1,1] (model-free vol tier)"))
 
 # ── §4 signal ops ──
 register(OpSpec("weighted_blend", "signal",

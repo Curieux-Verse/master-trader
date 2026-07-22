@@ -80,6 +80,47 @@ def enrich_footprint(market: str, snapshot_id: str = "real", symbols: Optional[L
     return enriched
 
 
+def enrich_macro(market: str, snapshot_id: str = "real", symbols: Optional[List[str]] = None,
+                 months: int = 18, do_cot: bool = True, do_news: bool = True, log=print) -> int:
+    """Attach CFTC COT positioning (cot_z) + GDELT news tone (news_tone) to HTF bars of the
+    mapped symbols, over deep history. Unmapped symbols keep NaN (feature skipped there)."""
+    import json
+    from mt.ingest import cot as cot_mod, news as news_mod
+    m = MARKETS[market]
+    man_path = LAKE_DIR / snapshot_id / market / "_snapshot.json"
+    if not man_path.exists():
+        log(f"    [{market}] no lake snapshot."); return 0
+    manifest = json.loads(man_path.read_text())
+    syms = symbols or manifest.get("symbols", [])
+    enriched = 0
+    for f in manifest.get("frames", []):
+        if f["tf"] != m.htf or f["symbol"] not in syms:
+            continue
+        cotdf = cot_mod.fetch_cot_z(f["symbol"]) if do_cot else None
+        newsdf = news_mod.fetch_news_tone(f["symbol"], months) if do_news else None
+        if cotdf is None and newsdf is None:
+            continue
+        df = pd.read_parquet(f["path"])
+        df["datetime"] = pd.to_datetime(df["datetime"], utc=True)
+        df = df.drop(columns=[c for c in ("cot_z", "news_tone") if c in df.columns], errors="ignore").sort_values("datetime")
+        if cotdf is not None:
+            df = pd.merge_asof(df, cotdf.sort_values("datetime"), on="datetime", direction="backward")
+        if newsdf is not None:
+            df = pd.merge_asof(df, newsdf.sort_values("datetime"), on="datetime", direction="backward")
+        for c in FRAME_COLS:
+            if c not in df.columns:
+                df[c] = np.nan
+        df[FRAME_COLS].to_parquet(f["path"], index=False)
+        enriched += 1
+        tags = []
+        if cotdf is not None and "cot_z" in df:
+            tags.append(f"cot({int(df['cot_z'].notna().sum())})")
+        if newsdf is not None and "news_tone" in df:
+            tags.append(f"news({int(df['news_tone'].notna().sum())})")
+        log(f"    [{market}] {f['symbol']}: {' '.join(tags) or 'no macro'}")
+    return enriched
+
+
 def _atr(df: pd.DataFrame, window: int = 14) -> np.ndarray:
     high, low, close = df["high"].to_numpy(), df["low"].to_numpy(), df["close"].to_numpy()
     prev = np.concatenate([[close[0]], close[:-1]])

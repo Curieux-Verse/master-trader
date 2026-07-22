@@ -38,10 +38,10 @@ def _build_panels(market, source, snapshot_id, seed, structure):
     if source == "lake":
         if not lake_has_data(market, snapshot_id):
             return None
-        # capped to recent real bars so feature/backtest cost stays bounded on a 50-name book
-        train = read_lake_panel(market, snapshot_id, 0.0, 0.70, max_bars=600)     # discovery
-        holdout = read_lake_panel(market, snapshot_id, 0.70, 0.85, max_bars=250)  # transfer holdout (G6)
-        live = read_lake_panel(market, snapshot_id, 0.85, 1.0, max_bars=250)      # most recent → paper
+        # use deep history where available (DSR power); cap keeps a 50-name book tractable
+        train = read_lake_panel(market, snapshot_id, 0.0, 0.72, max_bars=2000)    # discovery
+        holdout = read_lake_panel(market, snapshot_id, 0.72, 0.86, max_bars=500)  # transfer holdout (G6)
+        live = read_lake_panel(market, snapshot_id, 0.86, 1.0, max_bars=400)      # most recent → paper
         return train, holdout, live
     a = MarketAdapter(market)
     return (a.build_panel(bars=440, seed=seed, structure=structure, snapshot_id=f"sys_{market}"),

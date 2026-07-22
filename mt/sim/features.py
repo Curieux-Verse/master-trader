@@ -436,6 +436,67 @@ def absorption(panel: NormPanel, args: dict, tf: str) -> pd.DataFrame:
     return fp.rolling(3, min_periods=1).mean()
 
 
+# ─── the last five (docs/11): pattern, SMC OB, vol-regime ─────────────────
+def candlestick_pattern(panel: NormPanel, args: dict, tf: str) -> pd.DataFrame:
+    """Signed candlestick pattern flag (engulfing / pin / doji / inside)."""
+    pat = str(args.get("pattern", "engulfing"))
+    close, high, low, _, _ = _mats(panel, tf)
+    open_ = panel.field_matrix("open", tf).reindex_like(close)
+    body = close - open_
+    rng = (high - low).replace(0, np.nan)
+    if pat == "engulfing":
+        po, pc = open_.shift(1), close.shift(1)
+        bull = (close > open_) & (pc < po) & (close >= po) & (open_ <= pc)
+        bear = (close < open_) & (pc > po) & (close <= po) & (open_ >= pc)
+        return bull.astype(float) - bear.astype(float)
+    if pat == "pin":
+        upper = high - np.maximum(close, open_); lower = np.minimum(close, open_) - low; b = body.abs()
+        return ((lower > 2 * b) & (upper < b)).astype(float) - ((upper > 2 * b) & (lower < b)).astype(float)
+    if pat == "doji":
+        return (body.abs() < 0.1 * rng).astype(float)
+    return ((high < high.shift(1)) & (low > low.shift(1))).astype(float)   # inside bar
+
+
+def order_block_strength(panel: NormPanel, args: dict, tf: str) -> pd.DataFrame:
+    """SMC order block: net recent displacement-after-opposite-candle pressure, in ATR.
+    A lightweight vectorized proxy for the concepts/ detector (which is snapshot-only)."""
+    close, high, low, _, atr = _mats(panel, tf)
+    open_ = panel.field_matrix("open", tf).reindex_like(close)
+    body = (close - open_) / atr
+    displacement = body.where(body.abs() > 1.5, 0.0)                       # institutional candle
+    prior_opposite = np.sign(body) != np.sign(body.shift(1))              # preceded by an opposite candle
+    ob = displacement.where(prior_opposite, 0.0)
+    return ob.rolling(10, min_periods=1).sum()
+
+
+def vol_regime_tag(panel: NormPanel, args: dict, tf: str) -> pd.DataFrame:
+    """Volatility regime in [-1,1]: percentile of current realized vol vs its trailing history
+    (calm → −1, extreme → +1). A model-free version of the risk-grid's vol tier."""
+    close = _close(panel, tf)
+    rv = close.pct_change().rolling(48, min_periods=12).std()
+    pct = rv.rolling(200, min_periods=50).rank(pct=True)
+    return 2.0 * pct - 1.0
+
+
+# ─── macro feed-based (COT positioning, news tone) — read enriched columns ─
+def cot_zscore(panel: NormPanel, args: dict, tf: str) -> pd.DataFrame:
+    """CFTC COT net-positioning z-score (asset-mgr/large-spec), from the enriched cot_z column."""
+    w = int(args.get("window", 26))
+    cz = panel.field_matrix("cot_z", tf)
+    if cz.empty or not cz.notna().any().any():
+        return _close(panel, tf) * np.nan
+    return cz.rolling(w, min_periods=1).mean()
+
+
+def news_sentiment(panel: NormPanel, args: dict, tf: str) -> pd.DataFrame:
+    """News tone (GDELT) rolling average, from the enriched news_tone column."""
+    w = int(args.get("window", 24))
+    nt = panel.field_matrix("news_tone", tf)
+    if nt.empty or not nt.notna().any().any():
+        return _close(panel, tf) * np.nan
+    return nt.rolling(w, min_periods=1).mean()
+
+
 BUILDERS: Dict[str, Callable[[NormPanel, dict, str], pd.DataFrame]] = {
     # classical
     "momentum": momentum, "reversion": reversion, "ema_dist": ema_dist, "rsi": rsi,
@@ -463,6 +524,9 @@ BUILDERS: Dict[str, Callable[[NormPanel, dict, str], pd.DataFrame]] = {
     "structure_break": structure_break, "fvg_gap": fvg_gap, "liquidity_sweep": liquidity_sweep,
     # tick footprint (real aggTrades)
     "stacked_imbalance": stacked_imbalance, "absorption": absorption,
+    # the last five: pattern / SMC OB / vol-regime / COT / news
+    "candlestick_pattern": candlestick_pattern, "order_block_strength": order_block_strength,
+    "vol_regime_tag": vol_regime_tag, "cot_zscore": cot_zscore, "news_sentiment": news_sentiment,
 }
 
 

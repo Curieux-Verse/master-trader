@@ -32,6 +32,8 @@ def main():
     ap.add_argument("--flow-days", type=int, default=0,
                     help="crypto: enrich recent HTF bars with real aggTrades footprint (0 = off)")
     ap.add_argument("--flow-symbols", type=int, default=8, help="how many top symbols to footprint-enrich")
+    ap.add_argument("--macro", action="store_true",
+                    help="enrich mapped symbols with CFTC COT positioning + GDELT news tone (deep)")
     args = ap.parse_args()
     markets = [m.strip() for m in args.markets.split(",") if m.strip()]
 
@@ -62,6 +64,13 @@ def main():
               f"({args.flow_days}d)…")
         n = enrich_footprint("crypto", snapshot_id=args.snapshot_id, days=args.flow_days, top_k=args.flow_symbols)
         print(f"   → footprint attached to {n} symbol frames")
+
+    if args.macro:
+        from mt.ingest.lake import enrich_macro
+        for m in markets:
+            print(f"\n[{m}] enriching mapped symbols with CFTC COT + GDELT news (deep)…")
+            n = enrich_macro(m, snapshot_id=args.snapshot_id)
+            print(f"   → macro attached to {n} symbol frames")
 
     print("\n" + "=" * 70)
     print(" LAKE READY")
