@@ -20,7 +20,10 @@ from typing import Dict, List, Optional
 import numpy as np
 import pandas as pd
 
-FRAME_COLS = ["datetime", "open", "high", "low", "close", "volume", "atr_14", "funding_rate"]
+FRAME_COLS = ["datetime", "open", "high", "low", "close", "volume", "atr_14", "funding_rate",
+              "taker_buy_volume", "trade_count",   # → real bar-level order flow (Binance)
+              "ref_close",                          # benchmark close (BTC / gold) → cross-asset
+              "fp_stacked", "fp_absorption"]        # tick footprint (aggTrades) → stacked imbalance / absorption
 SNAPSHOT_COLS = ["close", "ret_1", "atr_pct", "quote_volume_usd", "funding_rate"]
 
 

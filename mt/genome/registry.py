@@ -176,8 +176,14 @@ register(OpSpec("funding_z", "feature", {"window": _win(72, 8, 200)}, output="Se
                 tags=("microstructure", "funding", "crypto"), computable=True,
                 doc="funding-rate z-score (contrarian to crowded funding)"))
 register(OpSpec("order_flow_imbalance", "feature", {"window": _win(48, 5, 200)}, output="Series[zscore]",
-                data_requires=("trades",), cost_class="medium", tags=("microstructure", "order_flow"),
-                computable=False, doc="aggressive buy−sell imbalance (needs trades)"))
+                data_requires=("taker_buy",), cost_class="medium", tags=("microstructure", "order_flow"),
+                computable=True, doc="net aggressor fraction from REAL Binance taker-buy volume"))
+register(OpSpec("aggressor_ratio", "feature", {"window": _win(48, 5, 200)}, output="Series[return]",
+                data_requires=("taker_buy",), cost_class="medium", tags=("microstructure", "order_flow", "auction_market_theory"),
+                computable=True, doc="market-buy vs market-sell share (real taker-buy), centered"))
+register(OpSpec("trade_intensity", "feature", {"window": _win(48, 5, 200)}, output="Series[zscore]",
+                data_requires=("taker_buy",), cost_class="medium", tags=("microstructure", "auction_market_theory"),
+                computable=True, doc="auction speed: z-score of real trades-per-bar"))
 
 # ── 3.15 Auction Market Theory & order flow (AMT proxies computable; footprint declared) ──
 register(OpSpec("dist_to_poc", "feature", {"window": _win(60, 20, 240)}, output="Series[zscore]",
@@ -196,13 +202,13 @@ register(OpSpec("rotation_factor", "feature", {"window": ArgSpec("int", 5, 60, d
                 output="Series[zscore]", cost_class="cheap", tags=("auction_market_theory",),
                 computable=True, doc="TPO up/down rotation count proxy"))
 register(OpSpec("stacked_imbalance", "feature", {"n_levels": ArgSpec("int", 2, 6, default=3)},
-                output="Series[binary]", data_requires=("trades",), cost_class="heavy",
-                tags=("auction_market_theory", "order_flow", "footprint"), computable=False,
-                doc="consecutive lopsided footprint levels (needs trades)"))
+                output="Series[zscore]", data_requires=("trades",), cost_class="heavy",
+                tags=("auction_market_theory", "order_flow", "footprint"), computable=True,
+                doc="consecutive lopsided footprint levels from REAL aggTrades (fp_stacked)"))
 register(OpSpec("absorption", "feature", {"window": ArgSpec("int", 3, 50, default=10)},
-                output="Series[binary]", data_requires=("trades",), cost_class="heavy",
-                tags=("auction_market_theory", "order_flow", "footprint"), computable=False,
-                doc="large passive fills halting price (needs trades)"))
+                output="Series[zscore]", data_requires=("trades",), cost_class="heavy",
+                tags=("auction_market_theory", "order_flow", "footprint"), computable=True,
+                doc="aggressive volume that failed to move price, from REAL aggTrades (fp_absorption)"))
 
 # ── extended computable families (breadth mandate — no school privileged) ──
 # trend
@@ -271,11 +277,19 @@ register(OpSpec("order_block_strength", "feature",
                 {"tf": ArgSpec("choice", choices=("htf", "mtf", "ltf"), default="htf")},
                 output="Series[osc_0_100]", cost_class="medium", tags=("smc", "ict"), computable=False,
                 doc="0–7 OB strength — wraps concepts/ via compute_smc_features (pending)"))
-register(OpSpec("rolling_corr", "feature",
-                {"symbol": ArgSpec("choice", choices=("DXY", "XAU", "SPX", "BTC.D", "US10Y"), default="DXY"),
-                 "window": _win(60, 20, 200)},
+register(OpSpec("rolling_corr", "feature", {"window": _win(60, 20, 200)},
                 output="Series[zscore]", data_requires=("cross_asset",), cost_class="medium",
-                tags=("cross_asset", "intermarket"), computable=False))
+                tags=("cross_asset", "intermarket"), computable=True,
+                doc="rolling correlation of returns with the market benchmark (BTC / gold)"))
+# SMC / ICT — lightweight computable time-series proxies (full concepts/* remain snapshot-only)
+register(OpSpec("structure_break", "feature", {"window": _win(20, 8, 100)}, output="Series[categorical]",
+                cost_class="medium", tags=("smc", "ict"), computable=True,
+                doc="break of structure: close beyond the prior N-bar swing extreme"))
+register(OpSpec("fvg_gap", "feature", {}, output="Series[zscore]", cost_class="medium",
+                tags=("smc", "ict"), computable=True, doc="signed fair-value-gap size in ATR"))
+register(OpSpec("liquidity_sweep", "feature", {"window": _win(20, 8, 100)}, output="Series[categorical]",
+                cost_class="medium", tags=("smc", "ict"), computable=True,
+                doc="swept-then-reclaim of a prior swing extreme (stop run)"))
 register(OpSpec("cot_zscore", "feature",
                 {"report": ArgSpec("choice", choices=("legacy", "TFF"), default="TFF")},
                 output="Series[zscore]", data_requires=("cot",), cost_class="cheap",

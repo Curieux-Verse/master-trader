@@ -61,12 +61,15 @@ def fetch_klines(symbol: str, interval: str, limit: int = 1500) -> pd.DataFrame:
         return pd.DataFrame()
     df = pd.DataFrame(raw, columns=["open_time", "open", "high", "low", "close", "volume",
                                     "close_time", "qav", "trades", "tbav", "tqav", "ignore"])
-    for c in ("open", "high", "low", "close", "volume"):
+    for c in ("open", "high", "low", "close", "volume", "tbav"):
         df[c] = pd.to_numeric(df[c], errors="coerce")
+    df["trade_count"] = pd.to_numeric(df["trades"], errors="coerce")
+    df["taker_buy_volume"] = df["tbav"]                      # aggressive-buy base volume → real order flow
     df["datetime"] = pd.to_datetime(df["open_time"], unit="ms", utc=True)
     now_ms = pd.Timestamp.utcnow().value // 1_000_000
     df = df[df["close_time"] <= now_ms]                      # drop the still-forming candle
-    return df[["datetime", "open", "high", "low", "close", "volume"]].reset_index(drop=True)
+    return df[["datetime", "open", "high", "low", "close", "volume",
+               "taker_buy_volume", "trade_count"]].reset_index(drop=True)
 
 
 def fetch_funding(symbol: str, limit: int = 1000) -> pd.DataFrame:

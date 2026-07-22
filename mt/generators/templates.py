@@ -16,10 +16,14 @@ from mt.genome.schema import Genome, Meta, FeatureNode, SignalSpec, SizingSpec, 
 
 
 def available_feeds(market: str) -> set:
-    """Data feeds this market can currently satisfy (thin slice: ohlcv + maybe funding)."""
+    """Data feeds this market can currently satisfy."""
     feeds = {"ohlcv"}
-    if MARKETS[market].has_funding:
+    m = MARKETS[market]
+    if m.has_funding:
         feeds.add("funding_rate")
+    if m.kind == "crypto":
+        feeds.add("taker_buy")           # Binance klines carry taker-buy volume + trade count
+    feeds.add("cross_asset")             # ingest attaches a benchmark ref_close (BTC / gold)
     return feeds
 
 

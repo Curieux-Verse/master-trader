@@ -19,7 +19,7 @@ import pandas as pd
 
 from mt.config import LAKE_DIR, MARKETS
 from mt.data.panel import write_frame, FRAME_COLS
-from mt.ingest import binance, oanda
+from mt.ingest import binance, oanda, binance_dumps
 
 
 @dataclass
@@ -34,6 +34,52 @@ class IngestResult:
     frames: int
 
 
+def _tf_minutes(tf: str) -> int:
+    tf = tf.strip()
+    unit, val = (tf[-1].lower(), int(tf[:-1])) if tf[0].isdigit() else (tf[0].lower(), int(tf[1:] or 1))
+    return {"m": 1, "h": 60, "d": 1440}[unit] * val
+
+
+def enrich_footprint(market: str, snapshot_id: str = "real", symbols: Optional[List[str]] = None,
+                     days: int = 5, top_k: int = 8, log=print) -> int:
+    """Attach REAL tick footprint (fp_stacked, fp_absorption) to recent HTF bars via aggTrades.
+
+    Bounded by design (daily aggTrades are 2–20 MB): enriches the top-`top_k` symbols for the
+    last `days` days. Older bars keep NaN footprint (the feature is skipped there)."""
+    import json
+    from mt.ingest import agg_trades
+    m = MARKETS[market]
+    if m.kind != "crypto":
+        log(f"    [{market}] footprint is Binance-only — skipping."); return 0
+    man_path = LAKE_DIR / snapshot_id / market / "_snapshot.json"
+    if not man_path.exists():
+        log(f"    [{market}] no lake snapshot — ingest first."); return 0
+    manifest = json.loads(man_path.read_text())
+    tf_min = _tf_minutes(m.htf)
+    syms = symbols or manifest.get("symbols", [])[:top_k]
+    enriched = 0
+    for f in manifest.get("frames", []):
+        if f["tf"] != m.htf or f["symbol"] not in syms:
+            continue
+        fp = agg_trades.bar_footprint_frame(f["symbol"], tf_min, days=days)
+        if fp.empty:
+            continue
+        df = pd.read_parquet(f["path"])
+        df["datetime"] = pd.to_datetime(df["datetime"], utc=True)
+        df = df.drop(columns=[c for c in ("fp_stacked", "fp_absorption") if c in df.columns], errors="ignore")
+        fpm = fp.rename(columns={"stacked_imbalance": "fp_stacked", "absorption": "fp_absorption"})
+        merged = pd.merge_asof(df.sort_values("datetime"),
+                               fpm[["datetime", "fp_stacked", "fp_absorption"]].sort_values("datetime"),
+                               on="datetime", direction="backward", tolerance=pd.Timedelta(minutes=tf_min))
+        for c in FRAME_COLS:
+            if c not in merged.columns:
+                merged[c] = np.nan
+        merged[FRAME_COLS].to_parquet(f["path"], index=False)
+        enriched += 1
+        log(f"    [{market}] {f['symbol']}: footprint on {int(fpm['fp_stacked'].notna().sum())} recent bars")
+    return enriched
+
+
 def _atr(df: pd.DataFrame, window: int = 14) -> np.ndarray:
     high, low, close = df["high"].to_numpy(), df["low"].to_numpy(), df["close"].to_numpy()
     prev = np.concatenate([[close[0]], close[:-1]])
@@ -41,15 +87,25 @@ def _atr(df: pd.DataFrame, window: int = 14) -> np.ndarray:
     return pd.Series(tr).rolling(window, min_periods=1).mean().to_numpy()
 
 
-def _fetch(market: str, symbol: str, tf: str, bars: int) -> pd.DataFrame:
+_BENCHMARK = {"crypto": "BTC/USDT:USDT", "fx": "XAU_USD", "xau": "XAU_USD"}   # cross-asset ref
+
+
+def _fetch(market: str, symbol: str, tf: str, bars: int, deep_months: int = 0,
+           is_htf: bool = False) -> pd.DataFrame:
     if MARKETS[market].kind == "crypto":
+        if deep_months and is_htf:                           # deep HTF history via bulk dumps
+            df = binance_dumps.build_deep_klines(symbol, tf, months=deep_months)
+            fr = binance.fetch_funding(symbol)
+            if not df.empty and not fr.empty:
+                df = pd.merge_asof(df.sort_values("datetime"), fr, on="datetime", direction="backward")
+            return df
         return binance.build_frame(symbol, tf, limit=bars, with_funding=True)
     return oanda.build_frame(symbol, tf, count=bars)          # fx / metal → OANDA
 
 
 def ingest_market(market: str, *, bars: int = 1500, snapshot_id: str = "real",
-                  symbols: Optional[List[str]] = None, top_n: int = 50, min_bars: int = 120,
-                  log=print) -> IngestResult:
+                  symbols: Optional[List[str]] = None, top_n: int = 50, deep_months: int = 0,
+                  min_bars: int = 120, log=print) -> IngestResult:
     m = MARKETS[market]
     tfs = {"htf": m.htf, "mtf": m.mtf, "ltf": m.ltf}
     if symbols is None and m.kind == "crypto":
@@ -61,6 +117,19 @@ def ingest_market(market: str, *, bars: int = 1500, snapshot_id: str = "real",
             symbols = m.universe
     syms = symbols or m.universe
     source = "binance_fapi" if m.kind == "crypto" else "oanda_v20"
+    if deep_months:
+        source += f"+dumps{deep_months}mo"
+
+    # cross-asset benchmark (BTC for crypto, gold for FX/XAU) → ref_close on every frame
+    bench_ref = None
+    bench_sym = _BENCHMARK.get(market)
+    if bench_sym:
+        try:
+            bdf = _fetch(market, bench_sym, m.htf, bars, deep_months, is_htf=True)
+            if bdf is not None and len(bdf):
+                bench_ref = bdf[["datetime", "close"]].rename(columns={"close": "ref_close"}).sort_values("datetime")
+        except Exception as e:
+            log(f"    [{market}] benchmark {bench_sym} fetch failed ({type(e).__name__})")
 
     frames_meta = []
     hasher = hashlib.sha256()
@@ -68,9 +137,9 @@ def ingest_market(market: str, *, bars: int = 1500, snapshot_id: str = "real",
     kept: List[str] = []
     for sym in syms:
         sym_ok = False
-        for tf in tfs.values():
+        for role, tf in tfs.items():
             try:
-                df = _fetch(market, sym, tf, bars)
+                df = _fetch(market, sym, tf, bars, deep_months, is_htf=(role == "htf"))
             except Exception as e:
                 log(f"    [{market}] {sym} {tf}: fetch error ({type(e).__name__}: {str(e)[:60]})")
                 continue
@@ -78,6 +147,8 @@ def ingest_market(market: str, *, bars: int = 1500, snapshot_id: str = "real",
                 continue
             df = df.copy()
             df["atr_14"] = _atr(df, 14)
+            if bench_ref is not None:
+                df = pd.merge_asof(df.sort_values("datetime"), bench_ref, on="datetime", direction="backward")
             for c in FRAME_COLS:
                 if c not in df.columns:
                     df[c] = np.nan

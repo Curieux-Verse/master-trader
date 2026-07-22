@@ -167,14 +167,16 @@ def test_amt_primitives_flow_through_executor():
     assert res.ok and res.summary["n_periods"] > 0
 
 
-def test_declared_only_primitive_is_not_sampled():
-    # AMT footprint (needs trades) is registered for planning but never wired by the generator
+def test_data_gated_and_declared_primitives_not_sampled():
     from mt.generators.templates import TemplateSampler
     ops_used = set()
     for g in TemplateSampler(seed=1).sample("crypto", n_random=20):
         ops_used.update(f.op for f in g.features)
+    # footprint is computable now but data-gated on `trades` (not in default feeds) → not sampled
     assert "stacked_imbalance" not in ops_used and "absorption" not in ops_used
-    assert REGISTRY["stacked_imbalance"].computable is False
+    # genuinely declared-only (no builder yet: needs concepts snapshot) → computable=False & unsampled
+    assert REGISTRY["order_block_strength"].computable is False
+    assert "order_block_strength" not in ops_used
 
 
 def test_gauntlet_is_trustworthy():

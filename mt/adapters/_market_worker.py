@@ -94,6 +94,11 @@ def _synth_frame(symbol: str, tf: str, bars: int, seed: int, kind: str, has_fund
         "open": open_, "high": high, "low": low, "close": close, "volume": volume,
     })
     df["atr_14"] = _atr(df, 14)
+    # synthetic order flow: aggressive-buy share correlated with the bar's return
+    ret = np.concatenate([[0.0], np.diff(close) / np.where(close[:-1] == 0, np.nan, close[:-1])])
+    buy_frac = np.clip(0.5 + 6.0 * ret + rng.normal(0, 0.05, bars), 0.05, 0.95)
+    df["taker_buy_volume"] = volume * buy_frac
+    df["trade_count"] = np.maximum(1.0, volume / max(np.median(volume), 1e-9) * 80.0)
     if has_funding:
         # small mean-reverting funding series (crypto perps)
         fr = rng.normal(0.0001, 0.0004, size=bars)

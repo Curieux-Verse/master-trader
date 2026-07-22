@@ -27,6 +27,11 @@ def main():
     ap.add_argument("--snapshot-id", default="real")
     ap.add_argument("--top-n", type=int, default=50,
                     help="crypto: number of top-volume perps to ingest (dynamic universe)")
+    ap.add_argument("--deep-months", type=int, default=0,
+                    help="crypto: extend HTF history via N months of bulk dumps (0 = REST only)")
+    ap.add_argument("--flow-days", type=int, default=0,
+                    help="crypto: enrich recent HTF bars with real aggTrades footprint (0 = off)")
+    ap.add_argument("--flow-symbols", type=int, default=8, help="how many top symbols to footprint-enrich")
     args = ap.parse_args()
     markets = [m.strip() for m in args.markets.split(",") if m.strip()]
 
@@ -45,10 +50,18 @@ def main():
                  else f"{len(MARKETS[m].universe)} instruments")
         print(f"\n[{m}] ingesting {scope} × 3 timeframes "
               f"({'Binance' if MARKETS[m].kind=='crypto' else 'OANDA'})…")
-        res = ingest_market(m, bars=args.bars, snapshot_id=args.snapshot_id, top_n=args.top_n)
+        res = ingest_market(m, bars=args.bars, snapshot_id=args.snapshot_id, top_n=args.top_n,
+                            deep_months=(args.deep_months if MARKETS[m].kind == "crypto" else 0))
         results.append(res)
         print(f"   → {len(res.symbols)} symbols kept, {res.frames} frames, "
               f"{res.total_rows} bars, content_hash={res.content_hash}")
+
+    if args.flow_days > 0 and "crypto" in markets:
+        from mt.ingest.lake import enrich_footprint
+        print(f"\n[crypto] enriching top {args.flow_symbols} symbols with real aggTrades footprint "
+              f"({args.flow_days}d)…")
+        n = enrich_footprint("crypto", snapshot_id=args.snapshot_id, days=args.flow_days, top_k=args.flow_symbols)
+        print(f"   → footprint attached to {n} symbol frames")
 
     print("\n" + "=" * 70)
     print(" LAKE READY")
