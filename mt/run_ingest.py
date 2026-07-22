@@ -25,6 +25,8 @@ def main():
     ap.add_argument("--markets", default="crypto,fx,xau")
     ap.add_argument("--bars", type=int, default=1500)
     ap.add_argument("--snapshot-id", default="real")
+    ap.add_argument("--top-n", type=int, default=50,
+                    help="crypto: number of top-volume perps to ingest (dynamic universe)")
     args = ap.parse_args()
     markets = [m.strip() for m in args.markets.split(",") if m.strip()]
 
@@ -39,9 +41,11 @@ def main():
         if MARKETS[m].kind != "crypto" and not oanda_available():
             print(f"\n[{m}] skipped (no OANDA key).")
             continue
-        print(f"\n[{m}] ingesting {len(MARKETS[m].universe)} symbols × 3 timeframes "
+        scope = (f"top {args.top_n} by 24h volume" if MARKETS[m].kind == "crypto"
+                 else f"{len(MARKETS[m].universe)} instruments")
+        print(f"\n[{m}] ingesting {scope} × 3 timeframes "
               f"({'Binance' if MARKETS[m].kind=='crypto' else 'OANDA'})…")
-        res = ingest_market(m, bars=args.bars, snapshot_id=args.snapshot_id)
+        res = ingest_market(m, bars=args.bars, snapshot_id=args.snapshot_id, top_n=args.top_n)
         results.append(res)
         print(f"   → {len(res.symbols)} symbols kept, {res.frames} frames, "
               f"{res.total_rows} bars, content_hash={res.content_hash}")

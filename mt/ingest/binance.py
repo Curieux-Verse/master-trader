@@ -6,6 +6,9 @@ as-of merge (funding accrues on the position held into each bar).
 """
 from __future__ import annotations
 
+from functools import lru_cache
+from typing import List
+
 import numpy as np
 import pandas as pd
 
@@ -17,6 +20,38 @@ FAPI = "https://fapi.binance.com/fapi/v1"
 def to_binance_symbol(symbol: str) -> str:
     """ccxt-style 'BTC/USDT:USDT' → Binance 'BTCUSDT'."""
     return symbol.split(":")[0].replace("/", "").replace("-", "")
+
+
+def to_ccxt_symbol(binance_symbol: str) -> str:
+    """Binance 'BTCUSDT' → ccxt-style 'BTC/USDT:USDT' (USDT-margined perp)."""
+    base = binance_symbol[:-4] if binance_symbol.endswith("USDT") else binance_symbol
+    return f"{base}/USDT:USDT"
+
+
+@lru_cache(maxsize=1)
+def _coin_perp_symbols() -> frozenset:
+    """USDT-margined perps whose underlying is actually a COIN (excludes the tokenized
+    EQUITY/COMMODITY 'TradFi' perps Binance now lists) and is TRADING."""
+    info = get_json(f"{FAPI}/exchangeInfo")
+    return frozenset(
+        s["symbol"] for s in info.get("symbols", [])
+        if s.get("underlyingType") == "COIN" and s.get("contractType") == "PERPETUAL"
+        and s.get("status") == "TRADING" and s["symbol"].endswith("USDT")
+    )
+
+
+def top_symbols_by_volume(n: int = 50, coin_only: bool = True) -> List[str]:
+    """Top-N USDT perps by 24h quote (dollar) volume, in ccxt symbol format.
+
+    coin_only (default) restricts to real crypto — the venue's top-volume list otherwise
+    includes tokenized stocks/commodities (SNDK, SOXL, XAUUSDT, …). Survivorship-safe by
+    construction: it reflects what is *currently* liquid; delisted names simply aren't here."""
+    tickers = get_json(f"{FAPI}/ticker/24hr")
+    valid = _coin_perp_symbols() if coin_only else None
+    rows = [(t["symbol"], float(t.get("quoteVolume", 0.0))) for t in tickers
+            if t["symbol"].endswith("USDT") and (valid is None or t["symbol"] in valid)]
+    rows.sort(key=lambda x: x[1], reverse=True)
+    return [to_ccxt_symbol(sym) for sym, _ in rows[:max(1, n)]]
 
 
 def fetch_klines(symbol: str, interval: str, limit: int = 1500) -> pd.DataFrame:

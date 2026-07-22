@@ -48,10 +48,17 @@ def _fetch(market: str, symbol: str, tf: str, bars: int) -> pd.DataFrame:
 
 
 def ingest_market(market: str, *, bars: int = 1500, snapshot_id: str = "real",
-                  symbols: Optional[List[str]] = None, min_bars: int = 120,
+                  symbols: Optional[List[str]] = None, top_n: int = 50, min_bars: int = 120,
                   log=print) -> IngestResult:
     m = MARKETS[market]
     tfs = {"htf": m.htf, "mtf": m.mtf, "ltf": m.ltf}
+    if symbols is None and m.kind == "crypto":
+        try:
+            symbols = binance.top_symbols_by_volume(top_n, coin_only=True)   # dynamic universe by $volume
+            log(f"    [{market}] universe: top {len(symbols)} crypto perps by 24h volume")
+        except Exception as e:
+            log(f"    [{market}] top-volume fetch failed ({type(e).__name__}); using config universe")
+            symbols = m.universe
     syms = symbols or m.universe
     source = "binance_fapi" if m.kind == "crypto" else "oanda_v20"
 
