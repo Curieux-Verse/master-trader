@@ -1,0 +1,48 @@
+name: ingest-lake
+
+# Builds the real, content-hashed data lake from the free feeds and caches it for the
+# marathon. Crypto (Binance) needs no auth; FX/gold need the OANDA_API_KEY repo secret.
+# Run this ONCE manually before the first marathon, then it refreshes weekly.
+on:
+  workflow_dispatch:
+    inputs:
+      markets:
+        description: "markets to ingest"
+        default: "crypto,fx,xau"
+      top_n:
+        description: "crypto: top-N perps by 24h volume"
+        default: "100"
+      deep_months:
+        description: "crypto: months of deep history via bulk dumps"
+        default: "12"
+  schedule:
+    - cron: "0 4 * * 1" # Mondays 04:00 UTC
+
+jobs:
+  ingest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Build the data lake
+        env:
+          OANDA_API_KEY: ${{ secrets.OANDA_API_KEY }}
+        run: |
+          python -m mt.run_ingest \
+            --markets "${{ github.event.inputs.markets || 'crypto,fx,xau' }}" \
+            --top-n "${{ github.event.inputs.top_n || '100' }}" \
+            --deep-months "${{ github.event.inputs.deep_months || '12' }}" \
+            --macro --calendar --snapshot-id real
+      - name: Cache the lake for the marathon
+        uses: actions/cache/save@v4
+        with:
+          path: var/lake
+          key: lake-real-${{ github.run_id }}

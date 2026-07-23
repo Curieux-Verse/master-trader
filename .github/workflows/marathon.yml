@@ -1,0 +1,89 @@
+name: marathon
+
+# The unattended, self-improving discovery loop. Every 6h it restores the lake + the
+# accumulated "brain" (var/mt.db) from cache, runs discovery for a wall-clock budget, saves
+# the brain back, commits a human-readable digest to runs/, and pings Telegram. Because the
+# DB carries archive + lessons + minted vocabulary + bandit learning across runs, discovery
+# COMPOUNDS session to session — no machine needs to stay on. NO capital is ever placed.
+on:
+  workflow_dispatch:
+    inputs:
+      minutes:
+        description: "wall-clock budget (min); <6h so state saves before the hard cap"
+        default: "300"
+  schedule:
+    - cron: "0 */6 * * *" # every 6 hours
+
+permissions:
+  contents: write # commit the research-log digests back to the repo
+
+concurrency:
+  group: marathon # never run two marathons at once (they'd fork the brain)
+  cancel-in-progress: false
+
+jobs:
+  discover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350 # hard backstop; --max-minutes exits cleanly before this
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install numba || echo "numba unavailable — pure-Python fallback will be used"
+
+      - name: Restore data lake
+        uses: actions/cache/restore@v4
+        with:
+          path: var/lake
+          key: lake-real
+          restore-keys: lake-real-
+      - name: Require a lake
+        run: |
+          if [ ! -d var/lake/real ]; then
+            echo "::error::No data lake in cache. Run the 'ingest-lake' workflow once first."
+            exit 1
+          fi
+
+      - name: Restore accumulated brain (db)
+        uses: actions/cache/restore@v4
+        with:
+          path: var/mt.db
+          key: mtdb-${{ github.run_id }}
+          restore-keys: mtdb-
+
+      - name: Run the marathon
+        env:
+          SMC_BOT_TOKEN: ${{ secrets.SMC_BOT_TOKEN }}
+          SMC_CHAT_ID: ${{ secrets.SMC_CHAT_ID }}
+          PYTHONIOENCODING: utf-8
+        run: |
+          python -m mt.run_continuous --source lake --snapshot-id real \
+            --generations 0 --max-minutes "${{ github.event.inputs.minutes || '300' }}" \
+            --report-every 10
+
+      - name: Save accumulated brain (db)
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: var/mt.db
+          key: mtdb-${{ github.run_id }}
+
+      - name: Publish research log
+        if: always()
+        run: |
+          python -m mt.run_genomes || true
+          mkdir -p runs
+          latest=$(ls -t var/runs/continuous_*_final.json 2>/dev/null | head -1)
+          [ -n "$latest" ] && cp "$latest" runs/latest_report.json || true
+          [ -f var/runs/genomes_current.md ] && cp var/runs/genomes_current.md runs/genomes_current.md || true
+          git config user.name "master-trader-bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add runs/
+          git commit -m "chore(research-log): marathon digest $(date -u +%FT%TZ) [skip ci]" || echo "nothing to commit"
+          git push || echo "push skipped"

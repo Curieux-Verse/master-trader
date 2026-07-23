@@ -2,12 +2,16 @@
 # The thin-slice demo runs on the base install (pandas/numpy/scipy/pyarrow + stdlib
 # sqlite3) with ZERO of the "later" groups. Install the rest as each phase lands.
 
-# --- Thin slice (P0/P1 demo) : needed now ---
+# --- Core runtime : needed now ---
 pandas>=2.0
 numpy>=1.24
 scipy>=1.10
-pyarrow>=14
-pydantic>=2.0
+pyarrow>=14          # Parquet data lake
+requests>=2.28       # free-feed ingestion (Binance / OANDA / CFTC / GDELT / FairEconomy)
+
+# --- Optional accelerator (guarded import; pure-Python fallback if absent) ---
+# numba>=0.59        # JIT the triple-barrier loop (~100x). Installed best-effort in CI so a
+#                    # resolver hiccup never blocks a run — see .github/workflows.
 
 # --- Data lake + ingestion (deepen P0) ---
 # ccxt>=4.3          # crypto live/recent fetch (CC_Trading data layer)

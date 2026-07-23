@@ -1,0 +1,30 @@
+name: tests
+
+# Health check on every push / PR: the unit suite + the gauntlet go/no-go self-test
+# (proves the immune system still rejects a planted overfit AND admits a planted real edge).
+on:
+  push:
+    branches: [master, main]
+    paths-ignore: ["runs/**", "**/*.md"]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pytest
+          pip install numba || echo "numba unavailable — pure-Python fallback will be used"
+      - name: Unit tests
+        run: pytest -q
+      - name: Gauntlet self-test (go/no-go)
+        run: python -m mt.selftest_gauntlet

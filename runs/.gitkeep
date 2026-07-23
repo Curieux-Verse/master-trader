@@ -1,0 +1,4 @@
+# Research log
+
+The marathon (`.github/workflows/marathon.yml`) commits its latest digest and genome
+snapshot here every run. Machine-generated — do not edit by hand.

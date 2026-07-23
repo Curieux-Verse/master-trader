@@ -14,11 +14,12 @@ dependencies = [
     "numpy>=1.24",
     "scipy>=1.10",
     "pyarrow>=14",
-    "pydantic>=2.0",
+    "requests>=2.28",
 ]
 
 [project.optional-dependencies]
 # Reused-market pure libs are imported via subprocess isolation, not installed here.
+accel = ["numba>=0.59"]   # JIT the triple-barrier loop (guarded; pure-Python fallback)
 search = ["deap>=1.4", "gplearn>=0.4"]
 data = ["ccxt>=4.3", "duckdb>=0.10", "polars>=0.20"]
 llm = []  # ollama (local) or free-tier hosted — decided at Phase 3

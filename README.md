@@ -35,6 +35,45 @@ A pool of **Generation Engines** continuously proposes candidate strategies, eac
 
 ---
 
+## Running it
+
+**Install**
+```bash
+pip install -r requirements.txt        # + optional: pip install numba  (JITs the hot loop ~100x)
+```
+
+**Locally**
+```bash
+python -m mt.selftest_gauntlet         # go/no-go: rejects a planted overfit, admits a planted edge
+python -m mt.run_ingest --top-n 100 --deep-months 12 --macro --calendar   # build the real data lake
+python -m mt.run_system --source lake --snapshot-id real --generations 4   # a bounded sprint (resets each run)
+python -m mt.run_continuous --source lake --generations 0                  # the marathon (accumulates; Ctrl-C to stop)
+python -m mt.run_genomes               # dump the live population → var/runs/genomes_current.md
+```
+
+The marathon is **stateful and resumable** — archive, lessons, minted vocabulary and bandit
+learning all accumulate in `var/mt.db`, so discovery **compounds across sessions**. No machine
+needs to stay on 24/7; it just learns whenever it runs.
+
+**Unattended & free, on GitHub Actions** (this repo is public → unlimited Actions minutes)
+
+| Workflow | Trigger | What it does |
+|---|---|---|
+| [`tests`](.github/workflows/tests.yml) | every push | unit suite + gauntlet self-test |
+| [`ingest-lake`](.github/workflows/ingest.yml) | manual + weekly | builds the data lake, caches it |
+| [`marathon`](.github/workflows/marathon.yml) | manual + every 6h | restores lake + brain, runs discovery ~5h, saves the brain, commits a digest to [`runs/`](runs/), pings Telegram |
+
+The marathon restores/saves `var/mt.db` (the "brain") from the Actions cache each run, so it
+compounds continuously without any always-on server. **First-time setup:**
+1. Add repo **Secrets** (Settings → Secrets → Actions): `OANDA_API_KEY` (FX/gold ingest — crypto needs none), and optionally `SMC_BOT_TOKEN` + `SMC_CHAT_ID` for the Telegram digest.
+2. Run the **`ingest-lake`** workflow once (Actions tab → Run workflow) to build the lake.
+3. Run **`marathon`** (or wait for the 6-hourly cron). Watch it learn via the digest's **best-z** climbing toward the significance bar.
+
+> **Governance:** every run is paper/shadow only. The machine never self-authorizes a
+> live-capital action — promotions are recommendations for a human to act on.
+
+---
+
 ## Non-negotiable principles
 
 1. **The null hypothesis is "this strategy is worthless."** Everything is built to reject, not to confirm. A backtest that looks good is a *suspect*, not a *result*.
@@ -55,4 +94,4 @@ A pool of **Generation Engines** continuously proposes candidate strategies, eac
 
 ---
 
-*Author: Principal Quantitative Researcher / Lead AI Architect. Status: **blueprint + working implementation** — the complete system (discovery → gauntlet → archive → self-improvement → paper) runs end-to-end across crypto/FX/XAU on the reused CC_Trading/FX_Trading stacks; see [`mt/`](mt/README.md). Currently on isolated synthetic data (a labeled edge knob for validation); real Binance/OANDA ingestion is the next step. Target markets: crypto (Binance), FX (OANDA), XAU (OANDA).*
+*Status: **working implementation, running on real data.** The complete system (discovery → gauntlet → archive → self-improvement → paper) runs end-to-end across crypto/FX/XAU on a real, content-hashed data lake — Binance USD-M (deep history + real order flow), OANDA v20 (FX/gold), CFTC COT, GDELT tone, and FairEconomy event calendars — with regime-conditioned search, a purged/embargoed CPCV + Deflated-Sharpe + bootstrap-Reality-Check gauntlet, and a convergence instrument (best-z) that shows whether the search is actually learning. Runs unattended and free on GitHub Actions. Markets: crypto (Binance), FX + XAU (OANDA). Paper only — no live-capital automation.*

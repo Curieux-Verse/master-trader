@@ -8,6 +8,7 @@ root may ever be on a process's sys.path — hence one worker process per market
 """
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List
@@ -24,7 +25,10 @@ for _d in (VAR_DIR, LAKE_DIR, RUNS_DIR):
     _d.mkdir(parents=True, exist_ok=True)
 
 # ─── the market registry ─────────────────────────────────────────────────
-_TRADING = Path("c:/Users/Curieux/Trading")
+# Root of the reused CC_Trading / FX_Trading stacks. Overridable via MT_TRADING_ROOT so the
+# system is portable to Linux / cloud runners — where those repos are absent, cclib falls back
+# to its pure-Python cost/bootstrap/DSR implementations and lake-based runs work unchanged.
+_TRADING = Path(os.environ.get("MT_TRADING_ROOT", "c:/Users/Curieux/Trading"))
 
 
 @dataclass(frozen=True)
