@@ -9,4 +9,6 @@ venv/
 *.db-shm
 .pytest_cache/
 .ipynb_checkpoints/
+# Reference books / large binaries — kept local, never published (copyright + repo bloat)
+*.pdf
 # Parquet lake + run artifacts live under var/ (git-ignored); registries are reproducible from seed+snapshot
