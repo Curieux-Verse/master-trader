@@ -25,6 +25,6 @@ jobs:
           pip install -r requirements.txt pytest
           pip install numba || echo "numba unavailable — pure-Python fallback will be used"
       - name: Unit tests
-        run: pytest -q
+        run: python -m pytest -q        # `python -m` puts the repo root on sys.path so `import mt` resolves
       - name: Gauntlet self-test (go/no-go)
         run: python -m mt.selftest_gauntlet
