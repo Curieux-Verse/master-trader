@@ -52,7 +52,7 @@ MARKETS: Dict[str, Market] = {
         kind="crypto",
         universe=["BTC/USDT:USDT", "ETH/USDT:USDT", "SOL/USDT:USDT", "BNB/USDT:USDT",
                   "XRP/USDT:USDT", "DOGE/USDT:USDT", "ADA/USDT:USDT", "AVAX/USDT:USDT",
-                  "LINK/USDT:USDT", "MATIC/USDT:USDT", "DOT/USDT:USDT", "LTC/USDT:USDT"],
+                  "LINK/USDT:USDT", "POL/USDT:USDT", "DOT/USDT:USDT", "LTC/USDT:USDT"],   # POL (ex-MATIC)
         fee_bps_per_side=5.0, half_spread_bps=2.0, has_funding=True,
     ),
     # FX — FX_Trading (OANDA REST, no ccxt). No cross-sectional engine of its own; the
@@ -79,6 +79,22 @@ MARKETS: Dict[str, Market] = {
         fee_bps_per_side=0.0, half_spread_bps=3.0, has_funding=False,
     ),
 }
+
+def available_feeds(market: str) -> set:
+    """Data feeds a market can currently satisfy — the single source of truth shared by the
+    template sampler AND the mutation operators, so no generator (template, random, OR evo)
+    can attach a feature whose data the market lacks (which would compute all-NaN, waste the
+    complexity budget, and over-report family coverage)."""
+    feeds = {"ohlcv"}
+    m = MARKETS[market]
+    if m.has_funding:
+        feeds.add("funding_rate")
+    if m.kind == "crypto":
+        feeds.add("taker_buy")               # Binance klines carry taker-buy volume + trade count
+    feeds.add("cross_asset")                 # ingest attaches a benchmark ref_close (BTC / gold)
+    feeds.update({"cot", "news", "calendar"})   # COT + GDELT + FairEconomy calendars
+    return feeds
+
 
 # CC_Trading is the stack whose pure libraries mt links directly (in-process).
 LIBRARY_MARKET = "crypto"

@@ -30,6 +30,26 @@ def _tf_minutes(tf: str) -> int:
     return {"m": 1, "h": 60, "d": 1440}[unit] * val
 
 
+def _drawdown_stats(net: pd.Series):
+    """(max fractional drawdown, longest time-under-water in periods) from a per-period return
+    series, compounding the equity curve — cumsum of simple returns understates DD as returns
+    grow (Hilpisch Ch8/16: use (1+r).cumprod(), not Σr, for equity/drawdown)."""
+    r = np.asarray(net, dtype=float)
+    r = r[np.isfinite(r)]
+    if len(r) == 0:
+        return float("nan"), 0
+    equity = np.cumprod(1.0 + r)
+    peak = np.maximum.accumulate(equity)
+    dd = np.where(peak > 0, (peak - equity) / peak, 0.0)
+    max_dd = float(np.max(dd))
+    underwater = dd > 1e-12                                    # longest consecutive run below peak
+    longest = run = 0
+    for u in underwater:
+        run = run + 1 if u else 0
+        longest = max(longest, run)
+    return max_dd, int(longest)
+
+
 class Tier1Executor:
     def __init__(self, seed: int = 4242):
         self.seed = seed
@@ -111,13 +131,20 @@ class Tier1Executor:
             return res
 
         net = pd.Series(nets, index=dates)
-        # optional vol-target rescaling (docs/02 §3): linear in weights ⇒ scale the series
+        turn_series = pd.Series(turns, index=dates)
+        # optional vol-target rescaling (docs/02 §3): linear in weights ⇒ scale the series by a
+        # per-period leverage path. The path is estimated from TRAILING vol only (no full-sample
+        # look-ahead), and the SAME path scales turnover so G5/G7's absolute checks stay honest.
         if genome.sizing.op == "vol_target":
-            net = self._vol_target(net, genome, tf, horizon)
+            net, kpath = self._vol_target(net, genome, tf, horizon)
+            turn_series = turn_series * kpath.reindex(turn_series.index).fillna(1.0)
+        elif genome.sizing.op == "kelly_fraction":
+            net, kpath = self._kelly_leverage(net, genome)
+            turn_series = turn_series * kpath.reindex(turn_series.index).fillna(0.0)
 
         res.net_returns = net
-        res.turnover = pd.Series(turns, index=dates)
-        res.summary = self._summarize(net, pd.Series(grosses, index=dates), pd.Series(turns, index=dates),
+        res.turnover = turn_series
+        res.summary = self._summarize(net, pd.Series(grosses, index=dates), turn_series,
                                       cost_per_turnover, tf, horizon, names_traded)
         res.behavioral_descriptor = self._descriptor(horizon, turns, net_expo, genome)
         return res
@@ -173,22 +200,33 @@ class Tier1Executor:
         w[order[:k]] = -(gross / 2.0) / k                # shorts (bottom)
         return np.clip(w, -per_name_cap, per_name_cap)
 
-    def _vol_target(self, net: pd.Series, genome: Genome, tf: str, horizon: int) -> pd.Series:
+    def _vol_target(self, net: pd.Series, genome: Genome, tf: str, horizon: int):
+        """Return (scaled_returns, leverage_path). Leverage at each period uses only PAST
+        realized vol (expanding, lagged one period) → point-in-time, not the full-sample σ."""
         target = float(genome.sizing.args.get("target_ann_vol", 0.15))
         ppy = (525600.0 / _tf_minutes(tf)) / horizon
-        est = net.std(ddof=1) * np.sqrt(ppy)
-        if not np.isfinite(est) or est <= 0:
-            return net
-        k = float(np.clip(target / est, 0.1, 3.0))
-        return net * k
+        trailing = net.expanding(min_periods=8).std(ddof=1).shift(1) * np.sqrt(ppy)   # ann. vol thru t-1
+        k = (target / trailing).clip(lower=0.1, upper=3.0)
+        k = k.fillna(1.0)                                  # warm-up periods trade unlevered
+        return net * k, k
+
+    def _kelly_leverage(self, net: pd.Series, genome: Genome):
+        """Growth-optimal (fractional-Kelly) book leverage from TRAILING return stats only
+        (Hilpisch Ch16: f* = (μ − r)/σ², r≈0). Leverage at t uses μ,σ² through t−1 (expanding,
+        lagged) → point-in-time; ≤0 trailing edge ⇒ 0 leverage (Kelly stands aside)."""
+        frac = float(genome.sizing.args.get("kelly_frac", 0.5))       # fraction of full Kelly
+        max_lev = float(genome.sizing.args.get("max_leverage", 3.0))
+        mu = net.expanding(min_periods=8).mean().shift(1)
+        var = net.expanding(min_periods=8).var(ddof=1).shift(1).replace(0, np.nan)
+        k = (frac * mu / var).clip(lower=0.0, upper=max_lev).fillna(0.0)
+        return net * k, k
 
     # ── summary + descriptor ──────────────────────────────────────────────
     def _summarize(self, net, gross, turnover, cost_per_turnover, tf, horizon, names_traded) -> dict:
         ppy = (525600.0 / _tf_minutes(tf)) / horizon
         mean = float(net.mean()); sd = float(net.std(ddof=1)) if len(net) > 1 else 0.0
         sharpe = (mean / sd * np.sqrt(ppy)) if sd > 0 else float("nan")
-        curve = net.cumsum()
-        max_dd = float((curve.cummax() - curve).max()) if len(curve) else float("nan")
+        max_dd, tuw = _drawdown_stats(net)                      # compounded fractional DD + time-under-water
         return {
             "n_periods": int(len(net)),
             "net_sharpe": sharpe,
@@ -196,6 +234,7 @@ class Tier1Executor:
             "ann_return": mean * ppy,
             "ann_vol": sd * np.sqrt(ppy),
             "max_dd": max_dd,
+            "max_dd_duration": tuw,                             # longest run below the running peak (periods)
             "hit_rate": float((net > 0).mean()),
             "avg_turnover": float(turnover.mean()),
             "avg_cost_drag": float(turnover.mean() * cost_per_turnover),

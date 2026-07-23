@@ -74,6 +74,7 @@ class PaperBook:
             self.alloc.update(day_rewards)
             if regime_match:
                 self.alloc.regime_adjust(regime_match)
+            self._correlation_shrink()                       # keep the book diversified (docs/07 §3)
             daily.append({"day": d, "book_return": round(book_r, 5),
                           "equity": round(self.equity[-1], 5), "weights": {k: round(v, 3) for k, v in w.items()}})
             if self.halted:
@@ -86,6 +87,25 @@ class PaperBook:
             "book_sharpe": self._book_sharpe(daily),
             "halted": self.halted,
         }
+
+    def _correlation_shrink(self, window: int = 20, min_obs: int = 6) -> None:
+        """Down-weight each strategy by its mean |correlation| with the rest of the book, from
+        the accumulated live returns — the correlation-aware half of the docs/07 allocator."""
+        if len(self.ids) < 2:
+            return
+        series = {gid: np.asarray(self.live_returns[gid][-window:], float) for gid in self.ids}
+        L = min(len(v) for v in series.values())
+        if L < min_obs:
+            return
+        M = np.vstack([series[gid][-L:] for gid in self.ids])
+        if not np.all(M.std(axis=1) > 0):
+            return
+        C = np.corrcoef(M)
+        corr = {}
+        for i, gid in enumerate(self.ids):
+            off = [abs(C[i, j]) for j in range(len(self.ids)) if j != i and np.isfinite(C[i, j])]
+            corr[gid] = float(np.mean(off)) if off else 0.0
+        self.alloc.correlation_shrink(corr)
 
     def _live_vs_backtest(self) -> Dict[str, dict]:
         out = {}

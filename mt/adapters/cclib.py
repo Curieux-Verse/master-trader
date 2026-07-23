@@ -88,9 +88,11 @@ def bootstrap_drawdown(returns: List[float], n_sims: int = 5000, seed: int = 42)
         return {"n": int(len(r)), "error": "too_few_returns"}
     rng = np.random.default_rng(seed)
     block = _opt_block(r)
-    curves = np.cumsum(r[_sb_indices(len(r), block, n_sims, rng)], axis=1)
-    running_max = np.maximum.accumulate(curves, axis=1)
-    max_dd = np.max(running_max - curves, axis=1)
+    # compounded equity per bootstrap path → FRACTIONAL drawdown (peak-to-trough / peak), the
+    # same definition the executor summary reports; cumsum of simple returns understates DD.
+    equity = np.cumprod(1.0 + r[_sb_indices(len(r), block, n_sims, rng)], axis=1)
+    running_max = np.maximum.accumulate(equity, axis=1)
+    max_dd = np.max((running_max - equity) / running_max, axis=1)
     thr = float(np.percentile(max_dd, 95))
     tail = max_dd[max_dd >= thr]
     return {
@@ -98,6 +100,37 @@ def bootstrap_drawdown(returns: List[float], n_sims: int = 5000, seed: int = 42)
         "max_dd_median": float(np.median(max_dd)),
         "max_dd_95": thr,
         "cvar_95": float(tail.mean()) if len(tail) else thr,
+        "engine": "cc_trading" if HAVE_CC_MC else "mt_fallback",
+    }
+
+
+def reality_check(returns: List[float], n_trials: int = 1, n_sims: int = 2000, seed: int = 42) -> dict:
+    """Non-parametric bootstrap Reality Check — an INDEPENDENT multiple-testing firewall next to
+    the (parametric) Deflated Sharpe. White (2000) / Hansen SPA in spirit: stationary-block
+    bootstrap the return series under the null of zero mean, get the single-trial bootstrap
+    p-value that the Sharpe > 0 is luck, then adjust it for the family size N with a Šidák FWER
+    correction. Because it makes NO distributional assumption about the Sharpe estimator, it
+    catches edges that look significant parametrically but are driven by a few lucky blocks."""
+    r = np.asarray([x for x in returns if np.isfinite(x)], float)
+    T = len(r)
+    if T < 10 or r.std(ddof=1) == 0:
+        return {"error": "too_few_returns", "n": int(T)}
+    sr = float(r.mean() / r.std(ddof=1))
+    rng = np.random.default_rng(seed)
+    block = _opt_block(r)
+    idx = _sb_indices(T, block, n_sims, rng)
+    paths = (r - r.mean())[idx]                                # recenter → the null (zero mean)
+    mu = paths.mean(axis=1)
+    sd = paths.std(axis=1, ddof=1)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        null_sr = np.where(sd > 0, mu / sd, 0.0)
+    p_single = float((np.sum(null_sr >= sr) + 1) / (n_sims + 1))   # one-sided, +1 smoothing
+    N = max(1, int(n_trials))
+    p_fwer = float(1.0 - (1.0 - p_single) ** N)                # Šidák family-wise adjustment
+    return {
+        "n": int(T), "raw_sharpe": round(sr, 5), "block_length": int(block),
+        "p_single": round(p_single, 5), "n_trials": N, "p_fwer": round(p_fwer, 5),
+        "is_significant": bool(sr > 0 and p_fwer < 0.05),
         "engine": "cc_trading" if HAVE_CC_MC else "mt_fallback",
     }
 

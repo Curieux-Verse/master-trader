@@ -22,6 +22,7 @@ from mt.data.panel import NormPanel
 from mt.genome.schema import Genome
 from mt.sim import features as F
 from mt.sim.evalresult import EvalResult
+from mt.sim.executor import _drawdown_stats
 
 
 def _tf_minutes(tf: str) -> int:
@@ -126,23 +127,23 @@ class Tier2Executor:
         return blended.reindex(index=grid.index, columns=grid.columns).fillna(0.0)
 
     def _summarize(self, net: pd.Series, bars_held: List[int], tf: str) -> dict:
-        span_bars = 1
-        if len(net) > 1:
-            span_bars = max(1, (pd.Timestamp(net.index[-1]) - pd.Timestamp(net.index[0])).total_seconds()
-                            / 60.0 / _tf_minutes(tf))
-        years = max(1e-6, span_bars * _tf_minutes(tf) / 525600.0)
-        tpy = len(net) / years
+        # Annualize by NON-OVERLAPPING holding periods per year (bars_per_year / avg_hold), exactly
+        # as Tier-1 does (ppy = bars_per_year / horizon). Using pooled trade COUNT / years would
+        # multiply the factor by the number of symbols traded concurrently — a spurious inflation.
+        bars_per_year = 525600.0 / _tf_minutes(tf)
+        avg_hold = float(np.mean(bars_held)) if bars_held else 1.0
+        tpy = bars_per_year / max(1.0, avg_hold)
         mean = float(net.mean()); sd = float(net.std(ddof=1)) if len(net) > 1 else 0.0
         sharpe = (mean / sd * np.sqrt(tpy)) if sd > 0 else float("nan")
-        curve = net.cumsum()
+        max_dd, tuw = _drawdown_stats(net)
         return {
             "n_periods": int(len(net)), "n_trades": int(len(net)),
             "net_sharpe": sharpe, "sharpe_pp": (mean / sd) if sd > 0 else float("nan"),
             "ann_return": mean * tpy,
             "ann_vol": sd * np.sqrt(tpy),
-            "max_dd": float((curve.cummax() - curve).max()) if len(curve) else float("nan"),
+            "max_dd": max_dd, "max_dd_duration": tuw,
             "hit_rate": float((net > 0).mean()), "avg_trade_ret": mean,
-            "avg_bars_held": float(np.mean(bars_held)) if bars_held else 0.0,
+            "avg_bars_held": avg_hold,
             "avg_turnover": 1.0, "trades": int(len(net)), "periods_per_year": tpy,
         }
 
@@ -157,42 +158,73 @@ class Tier2Executor:
                 "complexity": genome.complexity()}
 
 
-def _sim_symbol(c, h, lo, a, s, entry_thr, sl_mult, tp_mult, max_bars, cost) -> List[Tuple[int, int, float, int]]:
-    """Triple-barrier path sim for one symbol. Non-overlapping; SL checked before TP
-    (conservative on the intrabar ambiguity)."""
-    trades: List[Tuple[int, int, float, int]] = []
+def _sim_symbol_core(c, h, lo, a, s, entry_thr, sl_mult, tp_mult, max_bars, cost):
+    """Triple-barrier path sim for one symbol → parallel arrays (exit_idx, bars, ret, side).
+
+    Pure numeric so it JIT-compiles under Numba (10–100× the Python loop) with an identical
+    fallback. Non-overlapping; SL checked before TP (conservative on the intrabar ambiguity)."""
     n = len(c)
+    exit_idx = np.empty(n, dtype=np.int64)
+    bars_arr = np.empty(n, dtype=np.int64)
+    ret_arr = np.empty(n, dtype=np.float64)
+    side_arr = np.empty(n, dtype=np.int64)
+    cnt = 0
     i = 0
     while i < n - 1:
-        sv, av = s[i], a[i]
-        if not (np.isfinite(sv) and np.isfinite(av)) or av <= 0 or abs(sv) < entry_thr or not np.isfinite(c[i]):
+        sv = s[i]; av = a[i]
+        if not (np.isfinite(sv) and np.isfinite(av)) or av <= 0.0 or abs(sv) < entry_thr or not np.isfinite(c[i]):
             i += 1
             continue
         side = 1 if sv > 0 else -1
         entry = c[i]
         sl = entry - side * sl_mult * av
         tp = entry + side * tp_mult * av
-        exit_price = None
+        exit_price = entry
+        found = False
         j = i + 1
         bars = 0
         while j < n and bars < max_bars:
-            hj, lj = h[j], lo[j]
+            hj = h[j]; lj = lo[j]
             if side == 1:
                 if lj <= sl:
-                    exit_price = sl; break
+                    exit_price = sl; found = True; break
                 if hj >= tp:
-                    exit_price = tp; break
+                    exit_price = tp; found = True; break
             else:
                 if hj >= sl:
-                    exit_price = sl; break
+                    exit_price = sl; found = True; break
                 if lj <= tp:
-                    exit_price = tp; break
+                    exit_price = tp; found = True; break
             j += 1
             bars += 1
-        if exit_price is None:
-            j = min(j, n - 1)
+        if not found:
+            if j > n - 1:
+                j = n - 1
             exit_price = c[j]
-        ret = side * (exit_price - entry) / entry - cost
-        trades.append((j, max(1, bars), float(ret), side))
+        exit_idx[cnt] = j
+        bars_arr[cnt] = bars if bars > 1 else 1
+        ret_arr[cnt] = side * (exit_price - entry) / entry - cost
+        side_arr[cnt] = side
+        cnt += 1
         i = j + 1
-    return trades
+    return exit_idx[:cnt], bars_arr[:cnt], ret_arr[:cnt], side_arr[:cnt]
+
+
+# JIT-compile the hot loop when Numba is present; otherwise run the identical Python version.
+try:                                                             # pragma: no cover - env-dependent
+    from numba import njit as _njit
+    _sim_core = _njit(cache=True)(_sim_symbol_core)
+    HAVE_NUMBA = True
+except Exception:                                                # pragma: no cover
+    _sim_core = _sim_symbol_core
+    HAVE_NUMBA = False
+
+
+def _sim_symbol(c, h, lo, a, s, entry_thr, sl_mult, tp_mult, max_bars, cost) -> List[Tuple[int, int, float, int]]:
+    ei, ba, re, si = _sim_core(np.ascontiguousarray(c, dtype=np.float64),
+                               np.ascontiguousarray(h, dtype=np.float64),
+                               np.ascontiguousarray(lo, dtype=np.float64),
+                               np.ascontiguousarray(a, dtype=np.float64),
+                               np.ascontiguousarray(s, dtype=np.float64),
+                               float(entry_thr), float(sl_mult), float(tp_mult), int(max_bars), float(cost))
+    return list(zip(ei.tolist(), ba.tolist(), re.tolist(), si.tolist()))

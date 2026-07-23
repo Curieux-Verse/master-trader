@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import copy
 from itertools import combinations
-from typing import Callable, List, Optional
+from typing import Callable, Dict, List, Optional
 
 import numpy as np
 import pandas as pd
@@ -66,8 +66,14 @@ def _col_sharpe(mat: np.ndarray) -> np.ndarray:
         return np.where(sd > 0, mu / sd, np.nan)
 
 
-def cscv_pbo(mat: np.ndarray, n_groups: int = 8) -> Optional[float]:
-    """Probability of Backtest Overfitting via CSCV. mat is [T × K] (K ≥ 2 configs)."""
+def cscv_pbo(mat: np.ndarray, n_groups: int = 8, embargo_frac: float = 0.02) -> Optional[float]:
+    """Probability of Backtest Overfitting via CSCV. mat is [T × K] (K ≥ 2 configs).
+
+    `embargo_frac` implements López de Prado's purge/embargo: the trailing fraction of each
+    contiguous time-group is dropped so two temporally-adjacent observations never end up split
+    across the IS/OOS boundary (serial-correlation / overlapping-label leakage). This is what
+    makes the "Purged" in CPCV real — without it, directional triple-barrier trades whose labels
+    span a group boundary leak their outcome into the out-of-sample fold and deflate PBO."""
     if mat is None:
         return None
     T, K = mat.shape
@@ -76,8 +82,12 @@ def cscv_pbo(mat: np.ndarray, n_groups: int = 8) -> Optional[float]:
         if K < 2 or T < 2 * n_groups:
             return None
     groups = np.array_split(np.arange(T), n_groups)
+    emb = max(1, int(round(embargo_frac * T))) if embargo_frac > 0 else 0
+    if emb:                                                     # purge each group's trailing edge
+        groups = [g[:-emb] if len(g) > emb + 1 else g[:max(1, len(g) // 2)] for g in groups]
     half = n_groups // 2
     logits = []
+    oos_best = []                                              # OOS Sharpe of the IS-best config, per split
     for comb in combinations(range(n_groups), half):
         is_idx = np.concatenate([groups[i] for i in comb])
         oos_idx = np.concatenate([groups[i] for i in range(n_groups) if i not in comb])
@@ -89,6 +99,47 @@ def cscv_pbo(mat: np.ndarray, n_groups: int = 8) -> Optional[float]:
         w = (ranks[n_star] + 1) / (K + 1)                      # its OOS relative rank
         w = min(max(w, 1e-6), 1 - 1e-6)
         logits.append(np.log(w / (1 - w)))
+        oos_best.append(float(oos_sh[n_star]) if np.isfinite(oos_sh[n_star]) else np.nan)
     if not logits:
         return None
     return float(np.mean(np.array(logits) <= 0.0))             # P(IS-best below OOS median)
+
+
+def cscv_stats(mat: np.ndarray, n_groups: int = 8, embargo_frac: float = 0.02) -> Optional[Dict]:
+    """CSCV → {pbo, oos_sharpe_median, prob_oos_positive}. Beyond the scalar PBO, CPCV yields a
+    whole DISTRIBUTION of out-of-sample Sharpes for the in-sample-best config (its key advantage
+    over a single overfit estimate); we surface the median OOS Sharpe and the probability it is
+    positive as extra, honest robustness signals (docs/05 G3)."""
+    if mat is None:
+        return None
+    T, K = mat.shape
+    ng = n_groups
+    if K < 2 or T < 2 * ng:
+        ng = max(2, min(ng, T // 2))
+        if K < 2 or T < 2 * ng:
+            return None
+    groups = np.array_split(np.arange(T), ng)
+    emb = max(1, int(round(embargo_frac * T))) if embargo_frac > 0 else 0
+    if emb:
+        groups = [g[:-emb] if len(g) > emb + 1 else g[:max(1, len(g) // 2)] for g in groups]
+    half = ng // 2
+    logits, oos_best = [], []
+    for comb in combinations(range(ng), half):
+        is_idx = np.concatenate([groups[i] for i in comb])
+        oos_idx = np.concatenate([groups[i] for i in range(ng) if i not in comb])
+        is_sh = _col_sharpe(mat[is_idx]); oos_sh = _col_sharpe(mat[oos_idx])
+        if np.all(np.isnan(is_sh)) or np.all(np.isnan(oos_sh)):
+            continue
+        n_star = int(np.nanargmax(is_sh))
+        ranks = np.argsort(np.argsort(np.nan_to_num(oos_sh, nan=-1e9)))
+        w = min(max((ranks[n_star] + 1) / (K + 1), 1e-6), 1 - 1e-6)
+        logits.append(np.log(w / (1 - w)))
+        oos_best.append(float(oos_sh[n_star]) if np.isfinite(oos_sh[n_star]) else np.nan)
+    if not logits:
+        return None
+    ob = np.array(oos_best, dtype=float); ob = ob[np.isfinite(ob)]
+    return {
+        "pbo": float(np.mean(np.array(logits) <= 0.0)),
+        "oos_sharpe_median": float(np.median(ob)) if len(ob) else None,
+        "prob_oos_positive": float(np.mean(ob > 0)) if len(ob) else None,
+    }

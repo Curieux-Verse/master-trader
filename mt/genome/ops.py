@@ -11,6 +11,7 @@ from typing import List
 
 import numpy as np
 
+from mt.config import available_feeds
 from mt.genome.registry import REGISTRY, ops_for_stage, computable_feature_ops
 from mt.genome.schema import Genome, FeatureNode, SignalSpec, SizingSpec, RiskSpec
 
@@ -21,6 +22,14 @@ def _new_feature_id(existing: List[FeatureNode]) -> str:
     while f"f{n}" in ids:
         n += 1
     return f"f{n}"
+
+
+def _feature_ops_for(market: str) -> List:
+    """Computable feature ops whose data this market can satisfy — keeps evo mutation from
+    introducing inert cross-market features (e.g. taker-buy order flow on OANDA FX)."""
+    feeds = available_feeds(market)
+    ops = [op for op in computable_feature_ops() if all(d in feeds for d in op.data_requires)]
+    return ops or computable_feature_ops()          # never empty (fallback to full set)
 
 
 def mutate(g: Genome, rng: np.random.Generator) -> Genome:
@@ -38,12 +47,14 @@ def mutate(g: Genome, rng: np.random.Generator) -> Genome:
             k = list(spec.args)[int(rng.integers(len(spec.args)))]
             f.args[k] = spec.args[k].mutate(f.args.get(k, spec.args[k].default), rng)
     elif move == "swap_feature" and child.features:
+        pool = _feature_ops_for(child.meta.market)
         f = child.features[int(rng.integers(len(child.features)))]
-        new_op = computable_feature_ops()[int(rng.integers(len(computable_feature_ops())))]
+        new_op = pool[int(rng.integers(len(pool)))]
         f.op = new_op.name
         f.args = new_op.sample_args(rng)
     elif move == "add_feature":
-        new_op = computable_feature_ops()[int(rng.integers(len(computable_feature_ops())))]
+        pool = _feature_ops_for(child.meta.market)
+        new_op = pool[int(rng.integers(len(pool)))]
         child.features.append(FeatureNode(_new_feature_id(child.features), new_op.name, new_op.sample_args(rng)))
     elif move == "remove_feature":
         del child.features[int(rng.integers(len(child.features)))]

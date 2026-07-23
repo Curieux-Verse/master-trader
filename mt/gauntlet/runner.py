@@ -63,6 +63,7 @@ class Gauntlet:
         ordered = [
             G.g1_sanity(net),
             G.g4_deflated_sharpe(net, trial_count, ann_factor=ppy, sr_trial_std=sr_std),
+            G.g4b_reality_check(net, trial_count, seed=seed),
             G.g5_robustness(net, seed=seed),
             G.g2_oos_degradation(net),
             G.g7_capacity(genome, res, ctx),
@@ -93,11 +94,13 @@ class Gauntlet:
             "deflated_sharpe": g4.get("raw_sharpe"),
             "dsr_pvalue": g4.get("dsr_pvalue"),
             "one_minus_pbo": None if pbo is None else round(1.0 - pbo, 3),
+            "cpcv_oos_sharpe": g3.get("oos_sharpe_median"),   # CPCV OOS Sharpe distribution (B7)
             "capacity_sharpe_2x": g7.get("sharpe_2x_cost"),
             "neg_complexity": -genome.complexity(),
             "neg_archive_corr": None if g8.get("max_corr") is None else -g8["max_corr"],
             "net_sharpe": res.summary.get("net_sharpe"),
             "max_dd": res.summary.get("max_dd"),
+            "max_dd_duration": res.summary.get("max_dd_duration"),
             "phenotype": genome.meta.execution,
         }
 

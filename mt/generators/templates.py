@@ -10,22 +10,11 @@ from typing import List
 
 import numpy as np
 
-from mt.config import MARKETS
+from mt.config import MARKETS, available_feeds
 from mt.genome.registry import REGISTRY, ops_for_stage, computable_feature_ops
 from mt.genome.schema import Genome, Meta, FeatureNode, SignalSpec, SizingSpec, RiskSpec
 
-
-def available_feeds(market: str) -> set:
-    """Data feeds this market can currently satisfy."""
-    feeds = {"ohlcv"}
-    m = MARKETS[market]
-    if m.has_funding:
-        feeds.add("funding_rate")
-    if m.kind == "crypto":
-        feeds.add("taker_buy")           # Binance klines carry taker-buy volume + trade count
-    feeds.add("cross_asset")             # ingest attaches a benchmark ref_close (BTC / gold)
-    feeds.update({"cot", "news", "calendar"})   # COT + GDELT + FairEconomy calendars
-    return feeds
+__all__ = ["available_feeds", "TemplateSampler"]
 
 
 class TemplateSampler:
@@ -148,7 +137,7 @@ class TemplateSampler:
             risk = RiskSpec("triple_barrier", REGISTRY["triple_barrier"].sample_args(rng))
             meta = self._meta(market, "directional")
         else:                                             # cross-sectional phenotype
-            siz_name = ("rank_bucket", "vol_target")[int(rng.integers(2))]
+            siz_name = ("rank_bucket", "vol_target", "kelly_fraction")[int(rng.integers(3))]
             siz = SizingSpec(siz_name, REGISTRY[siz_name].sample_args(rng))
             risk = RiskSpec("horizon_hold", REGISTRY["horizon_hold"].sample_args(rng))
             meta = self._meta(market, "cross_sectional")

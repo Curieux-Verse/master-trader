@@ -79,7 +79,7 @@ class DiscoveryLoop:
             self.store.register_genome(g)
             res = evaluate(g, self.panel, self.seed)
             self.store.record_eval(res)
-            n_trials = self.store.trial_count()
+            n_trials = self.store.trial_count(self.market)     # per-market N, paired with per-market σ_SR
             report = self.gauntlet.run(g, res, trial_count=n_trials, ctx=ctx)
             self.store.record_gauntlet(g.genome_id, self.market, report.passed,
                                        report.failed_gate, report.gates, report.fitness)
@@ -102,12 +102,15 @@ class DiscoveryLoop:
             self.bandit.update(engine, reward)
             new_reports.append((g, report))
 
-        # refresh the NSGA-II parent pool (elitist: keep the best across generations)
-        pool = self.parents + new_reports
-        self.parents = list(zip(
-            nsga2.select_parents([g for g, _ in pool], [r for _, r in pool], k=12),
-            [r for _, r in pool][:12],
-        )) if pool else []
+        # refresh the NSGA-II parent pool (elitist: keep the best across generations). Only
+        # genomes that produced a usable backtest are eligible to breed; pair each survivor with
+        # its OWN report (index-based) so cross-generation Pareto ranking stays honest.
+        pool = self.parents + [(g, r) for g, r in new_reports if r.passed or r.scalar_fitness > float("-inf")]
+        if pool:
+            idx = nsga2.select_parent_indices([r for _, r in pool], k=12)
+            self.parents = [pool[i] for i in idx]
+        else:
+            self.parents = []
 
         mix.weights = self.bandit.weights()
         return {
@@ -151,7 +154,12 @@ class DiscoveryLoop:
     def _mine(self, cnt: int) -> List[Genome]:
         if self.rng.random() < 0.4:                      # occasionally grow the vocabulary
             miner_mod.mint_interaction(self.panel, self.rng)
-        seeds = miner_mod.mine_features(self.panel, n_candidates=max(9, cnt * 3), rng=self.rng, top=cnt)
+            self.store.record_screening(self.market, 1, kind="miner_intx")   # 1 IC-screened pair
+        n_cand = max(9, cnt * 3)
+        seeds = miner_mod.mine_features(self.panel, n_candidates=n_cand, rng=self.rng, top=cnt)
+        # every candidate the miner IC-screened is a hidden selection trial; charge the ones it
+        # did NOT promote to a genome (the promoted ones get their own ledger eval below).
+        self.store.record_screening(self.market, max(0, n_cand - len(seeds)), kind="miner_ic")
         genomes: List[Genome] = []
         for i, (fnode, _ic) in enumerate(seeds):
             fnode.id = "f1"

@@ -72,6 +72,13 @@ CREATE TABLE IF NOT EXISTS lessons (
     tags        TEXT,
     created_at  REAL
 );
+CREATE TABLE IF NOT EXISTS screening_ledger (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    market      TEXT,
+    n           INTEGER,
+    kind        TEXT,
+    created_at  REAL
+);
 """
 
 
@@ -149,11 +156,27 @@ class MTStore:
         s = statistics.pstdev(vals)
         return float(s) if s > 0 else None
 
+    def record_screening(self, market: str, n: int, kind: str = "miner_ic") -> None:
+        """Charge N *hidden* selection trials (e.g. IC-screened miner candidates that were
+        looked at but never separately backtested) to the Deflated-Sharpe family size, so G4 is
+        not silently under-deflated for the most overfitting-prone engine (docs/05 §3)."""
+        if n and n > 0:
+            self.conn.execute("INSERT INTO screening_ledger(market,n,kind,created_at) VALUES(?,?,?,?)",
+                              (market, int(n), kind, time.time()))
+            self.conn.commit()
+
     def trial_count(self, market: Optional[str] = None) -> int:
-        """The Deflated-Sharpe family size N: every eval ever recorded (docs/05 §3)."""
+        """The Deflated-Sharpe family size N: every eval ever recorded PLUS hidden screening
+        trials (docs/05 §3). Both counts are scoped the same way as the σ_SR dispersion the DSR
+        pairs with — per-market when a market is given — so N and σ_SR describe one trial set."""
         if market:
-            return self.conn.execute("SELECT COUNT(*) FROM result_ledger WHERE market=?", (market,)).fetchone()[0]
-        return self.conn.execute("SELECT COUNT(*) FROM result_ledger").fetchone()[0]
+            n_eval = self.conn.execute("SELECT COUNT(*) FROM result_ledger WHERE market=?", (market,)).fetchone()[0]
+            n_scr = self.conn.execute("SELECT COALESCE(SUM(n),0) FROM screening_ledger WHERE market=?",
+                                      (market,)).fetchone()[0]
+        else:
+            n_eval = self.conn.execute("SELECT COUNT(*) FROM result_ledger").fetchone()[0]
+            n_scr = self.conn.execute("SELECT COALESCE(SUM(n),0) FROM screening_ledger").fetchone()[0]
+        return int(n_eval) + int(n_scr)
 
     # ─── Gauntlet reports ────────────────────────────────────────────────
     def record_gauntlet(self, genome_id: str, market: str, passed: bool,

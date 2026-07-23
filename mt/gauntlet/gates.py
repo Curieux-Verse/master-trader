@@ -13,7 +13,7 @@ from typing import Dict, Optional
 import numpy as np
 import pandas as pd
 
-from mt.adapters.cclib import deflated_sharpe, bootstrap_drawdown, round_trip_cost_bps
+from mt.adapters.cclib import deflated_sharpe, bootstrap_drawdown, round_trip_cost_bps, reality_check
 from mt.config import MARKETS
 from mt.gauntlet import cpcv
 
@@ -91,6 +91,20 @@ def g4_deflated_sharpe(net: pd.Series, trial_count: int, ann_factor: float = 365
                        "trial_count": trial_count, "engine": dsr.get("engine")}, reason)
 
 
+# ── G4b Reality Check (non-parametric multiple-testing firewall, alongside G4) ─
+def g4b_reality_check(net: pd.Series, trial_count: int, seed: int = 42) -> GateResult:
+    rc = reality_check(net.tolist(), n_trials=max(1, trial_count), seed=seed)
+    if "error" in rc:
+        return GateResult("G4b_reality_check", "fail", rc, rc["error"])
+    passed = bool(rc.get("is_significant", False))
+    reason = "" if passed else (f"bootstrap p_fwer={rc.get('p_fwer')} (N={trial_count}) — Sharpe "
+                                f"not significant under stationary-block resampling")
+    return GateResult("G4b_reality_check", "pass" if passed else "fail",
+                      {"p_single": rc.get("p_single"), "p_fwer": rc.get("p_fwer"),
+                       "raw_sharpe": rc.get("raw_sharpe"), "trial_count": trial_count,
+                       "engine": rc.get("engine")}, reason)
+
+
 # ── G5 robustness: stationary-block bootstrap ──────────────────────────────
 def g5_robustness(net: pd.Series, seed: int = 42) -> GateResult:
     boot = bootstrap_drawdown(net.tolist(), n_sims=3000, seed=seed)
@@ -149,12 +163,18 @@ def g3_cpcv_pbo(genome, ctx) -> GateResult:
     rng = np.random.default_rng(getattr(ctx, "seed", 42))
     variants = cpcv.param_variants(genome, m=getattr(ctx, "cpcv_variants", 6), rng=rng)
     mat = cpcv.returns_matrix(variants, ctx.panel, ctx.eval_fn)
-    pbo = cpcv.cscv_pbo(mat, n_groups=getattr(ctx, "cpcv_groups", 8))
-    if pbo is None:
+    stats = cpcv.cscv_stats(mat, n_groups=getattr(ctx, "cpcv_groups", 8))
+    if stats is None:
         return GateResult("G3_cpcv_pbo", "deferred", reason="insufficient data for CSCV")
+    pbo = stats["pbo"]
     passed = pbo <= PBO_MAX
     reason = "" if passed else f"PBO={pbo:.2f} > {PBO_MAX} — parameter selection likely overfit"
-    return GateResult("G3_cpcv_pbo", "pass" if passed else "fail", {"pbo": round(pbo, 3)}, reason)
+    return GateResult("G3_cpcv_pbo", "pass" if passed else "fail",
+                      {"pbo": round(pbo, 3),
+                       "oos_sharpe_median": (None if stats["oos_sharpe_median"] is None
+                                             else round(stats["oos_sharpe_median"], 3)),
+                       "prob_oos_positive": (None if stats["prob_oos_positive"] is None
+                                             else round(stats["prob_oos_positive"], 3))}, reason)
 
 
 # ── G6 transfer / true out-of-sample (expensive; needs holdout) ────────────

@@ -56,7 +56,11 @@ def fetch_cot_z(symbol: str, limit: int = 500) -> Optional[pd.DataFrame]:
     if "market_and_exchange_names" in df and df["market_and_exchange_names"].nunique() > 1:
         main = df["market_and_exchange_names"].value_counts().idxmax()      # the primary contract
         df = df[df["market_and_exchange_names"] == main]
-    df["datetime"] = pd.to_datetime(df["report_date_as_yyyy_mm_dd"], utc=True)
+    # report_date is the Tuesday the positions were MEASURED; CFTC does not PUBLISH until the
+    # following Friday ~15:30 ET (~21:00 UTC). Align to the release instant so a backward as-of
+    # merge never lets a Wed/Thu/early-Fri bar see positioning that was not yet public (PIT).
+    df["datetime"] = (pd.to_datetime(df["report_date_as_yyyy_mm_dd"], utc=True)
+                      + pd.Timedelta(days=3, hours=21))
     for c in ("noncomm_positions_long_all", "noncomm_positions_short_all"):
         df[c] = pd.to_numeric(df[c], errors="coerce")
     df = df.sort_values("datetime")

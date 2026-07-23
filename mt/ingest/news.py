@@ -51,7 +51,10 @@ def fetch_news_tone(symbol: str, months: int = 18, polite_delay: float = 5.5) ->
     if not pts:
         return None
     df = pd.DataFrame(pts)
-    df["datetime"] = pd.to_datetime(df["date"], utc=True, errors="coerce")
+    # GDELT stamps each daily tone point at the day boundary, but the value aggregates ALL of
+    # that day's articles (incl. ones published later in the day). Lag by one day so an intraday
+    # bar never sees tone built from articles that were still in its own future (PIT).
+    df["datetime"] = pd.to_datetime(df["date"], utc=True, errors="coerce") + pd.Timedelta(days=1)
     df["news_tone"] = pd.to_numeric(df["value"], errors="coerce")
     out = df[["datetime", "news_tone"]].dropna()
     return out if len(out) else None

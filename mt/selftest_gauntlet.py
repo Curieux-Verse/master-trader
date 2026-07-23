@@ -97,6 +97,11 @@ def experiment_real_edge(seed: int = 2) -> dict:
 
 
 def run(verbose: bool = True) -> dict:
+    try:                                        # Windows consoles default to cp1252; the report has ✓/✗
+        import sys
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
     a = experiment_overfit_trap()
     b = experiment_real_edge()
     trap_ok = not a["passed"]                       # the overfit winner MUST be rejected

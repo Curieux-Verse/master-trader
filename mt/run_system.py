@@ -38,9 +38,12 @@ def _build_panels(market, source, snapshot_id, seed, structure):
     if source == "lake":
         if not lake_has_data(market, snapshot_id):
             return None
-        # use deep history where available (DSR power); cap keeps a 50-name book tractable
-        train = read_lake_panel(market, snapshot_id, 0.0, 0.72, max_bars=2000)    # discovery
-        holdout = read_lake_panel(market, snapshot_id, 0.72, 0.86, max_bars=500)  # transfer holdout (G6)
+        # use deep history where available (DSR power); cap keeps a 50-name book tractable.
+        # Note the ~2% EMBARGO GAPS (0.70–0.72, 0.84–0.86) dropped between splits: adjacent bars
+        # are serially correlated, so an unembargoed holdout/live isn't truly out-of-sample
+        # (López de Prado purge/embargo). The gaps make the G6 transfer + paper genuinely unseen.
+        train = read_lake_panel(market, snapshot_id, 0.0, 0.70, max_bars=2000)    # discovery
+        holdout = read_lake_panel(market, snapshot_id, 0.72, 0.84, max_bars=500)  # transfer holdout (G6)
         live = read_lake_panel(market, snapshot_id, 0.86, 1.0, max_bars=400)      # most recent → paper
         return train, holdout, live
     a = MarketAdapter(market)

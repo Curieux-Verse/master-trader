@@ -332,6 +332,14 @@ register(OpSpec("vol_target", "sizing",
                  "top_frac": ArgSpec("float", 0.05, 0.30, default=0.10),
                  "per_name_cap": ArgSpec("float", 0.02, 0.20, default=0.10)},
                 output="Position", inputs=("Signal",), tags=("vol_target",), computable=True))
+register(OpSpec("kelly_fraction", "sizing",
+                {"kelly_frac": ArgSpec("float", 0.2, 1.0, default=0.5),      # 0.5 = half Kelly (practitioner default)
+                 "max_leverage": ArgSpec("float", 1.0, 5.0, default=3.0),
+                 "top_frac": ArgSpec("float", 0.05, 0.30, default=0.10),
+                 "gross": ArgSpec("float", 0.5, 2.0, default=1.0),
+                 "per_name_cap": ArgSpec("float", 0.02, 0.20, default=0.10)},
+                output="Position", inputs=("Signal",), tags=("kelly", "capital_management"), computable=True,
+                doc="growth-optimal book leverage f*=(mu/sigma^2), fractional/half-Kelly, from TRAILING stats"))
 
 # ── §6 risk overlays ──
 register(OpSpec("horizon_hold", "risk",

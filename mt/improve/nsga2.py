@@ -16,18 +16,30 @@ from mt.genome.ops import mutate, crossover
 from mt.gauntlet.runner import GauntletReport
 
 
+def _num(v, fill: float) -> float:
+    """Coerce to a FINITE float — None *and* NaN/inf map to the conservative fill, so a
+    degenerate objective can never poison the domination test (np.all(a>=b) is all-False
+    against NaN, which would silently scramble the Pareto fronts)."""
+    try:
+        x = float(v)
+    except (TypeError, ValueError):
+        return fill
+    return x if np.isfinite(x) else fill
+
+
 def objectives(report: GauntletReport) -> np.ndarray:
-    """The maximize-all objective vector (missing objectives get conservative fills)."""
+    """The maximize-all objective vector (missing/NaN objectives get conservative fills)."""
     f = report.fitness
     ds = f.get("deflated_sharpe")
     if ds is None:
         ds = f.get("net_sharpe")
-    ds = float(ds) if ds is not None else -10.0
-    omp = f.get("one_minus_pbo"); omp = float(omp) if omp is not None else 0.0
-    cap = f.get("capacity_sharpe_2x"); cap = float(cap) if cap is not None else -10.0
-    nac = f.get("neg_archive_corr"); nac = float(nac) if nac is not None else 0.0
-    neg_cx = float(f.get("neg_complexity", -6))
-    return np.array([ds, omp, cap, neg_cx, nac], dtype=float)
+    ds = _num(ds, -10.0)
+    omp = _num(f.get("one_minus_pbo"), 0.0)
+    cap = _num(f.get("capacity_sharpe_2x"), -10.0)
+    nac = _num(f.get("neg_archive_corr"), 0.0)
+    neg_cx = _num(f.get("neg_complexity", -6), -6.0)
+    oos = _num(f.get("cpcv_oos_sharpe"), 0.0)          # reward configs that survive CPCV OOS (B7)
+    return np.array([ds, omp, cap, neg_cx, nac, oos], dtype=float)
 
 
 def _dominates(a: np.ndarray, b: np.ndarray) -> bool:
@@ -77,9 +89,13 @@ def crowding_distance(front: List[int], objs: List[np.ndarray]) -> dict:
     return dist
 
 
-def select_parents(genomes: List[Genome], reports: List[GauntletReport], k: int) -> List[Genome]:
-    """Top-k by (non-dominated rank, then crowding distance)."""
-    if not genomes:
+def select_parent_indices(reports: List[GauntletReport], k: int) -> List[int]:
+    """Indices of the top-k reports by (non-dominated rank, then crowding distance).
+
+    Returning INDICES (not genomes) is what lets the caller keep each surviving genome paired
+    with its OWN report — pairing the rank-ordered genomes with the pool-ordered reports would
+    silently mismatch them and corrupt the next generation's Pareto ranking of the elites."""
+    if not reports:
         return []
     objs = [objectives(r) for r in reports]
     fronts = fast_non_dominated_sort(objs)
@@ -87,7 +103,14 @@ def select_parents(genomes: List[Genome], reports: List[GauntletReport], k: int)
     for front in fronts:
         cd = crowding_distance(front, objs)
         ordered.extend(sorted(front, key=lambda i: -cd[i]))
-    return [genomes[i] for i in ordered[:max(1, k)]]
+    return ordered[:max(1, k)]
+
+
+def select_parents(genomes: List[Genome], reports: List[GauntletReport], k: int) -> List[Genome]:
+    """Top-k genomes by (non-dominated rank, then crowding distance)."""
+    if not genomes:
+        return []
+    return [genomes[i] for i in select_parent_indices(reports, k)]
 
 
 def breed(parents: List[Genome], n_children: int, rng: np.random.Generator) -> List[Genome]:
