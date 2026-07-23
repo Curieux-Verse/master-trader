@@ -34,13 +34,16 @@ class EngineMix:
 
 class DiscoveryLoop:
     def __init__(self, store: MTStore, market: str, panel, holdout_panel=None,
-                 seed: int = 4242, use_ollama: bool = False):
+                 seed: int = 4242, use_ollama: bool = False, explore_floor=None):
         self.store = store
         self.market = market
         self.panel = panel
         self.holdout = holdout_panel
         self.seed = seed
         self.use_ollama = use_ollama
+        # optional targeted-engine floor (e.g. {"evo":0.3,"miner":0.2}) so a long unattended
+        # search keeps spending N on directed engines, not blind random (docs/06 §4).
+        self.explore_floor = explore_floor
         self.sampler = TemplateSampler(seed=seed)
         self.bandit = EngineBandit(seed=seed)
         self.gauntlet = Gauntlet()
@@ -54,7 +57,7 @@ class DiscoveryLoop:
     # ─── one generation ──────────────────────────────────────────────────
     def run_generation(self, batch_size: int = 16) -> dict:
         self.generation += 1
-        alloc = self.bandit.allocate(batch_size)
+        alloc = self.bandit.allocate(batch_size, floors=self.explore_floor)
         produced: List[Tuple[Genome, str]] = []
         for engine, cnt in alloc.items():
             for g in self._generate(engine, cnt):
@@ -69,6 +72,8 @@ class DiscoveryLoop:
         fam_tested: Counter = Counter()
         pheno_tested: Counter = Counter()
         new_reports: List[Tuple[Genome, object]] = []
+        dsr_z: List[float] = []                              # distance-to-bar (N-aware): how close to G4
+        edge_t: List[float] = []                             # single-strategy t-stat (N-INDEPENDENT): learning
 
         for g, engine in produced:
             mix.produced[engine] += 1
@@ -99,6 +104,13 @@ class DiscoveryLoop:
                 if out["suggested_mutation"] is not None and len(self.pending_mutations) < 24:
                     self.pending_mutations.append(out["suggested_mutation"])
 
+            z = (report.gates.get("G4_deflated_sharpe", {}) or {}).get("dsr_z")
+            if z is not None and np.isfinite(z):
+                dsr_z.append(float(z))
+            spp = res.summary.get("sharpe_pp"); npd = res.summary.get("n_periods", 0)
+            if spp is not None and np.isfinite(spp) and npd > 1:
+                edge_t.append(float(spp) * np.sqrt(npd))     # SR·√T — significance free of the N penalty
+
             self.bandit.update(engine, reward)
             new_reports.append((g, report))
 
@@ -113,6 +125,9 @@ class DiscoveryLoop:
             self.parents = []
 
         mix.weights = self.bandit.weights()
+        # Two distinct signals: edge_t median (N-INDEPENDENT — is generation finding more raw edge?
+        # rising ⇒ learning, flat ⇒ space exhausted) and dsr_z best (N-aware — how close the single
+        # closest genome is to actually clearing G4 right now).
         return {
             "generation": self.generation,
             "produced": dict(mix.produced), "admits": dict(mix.admits),
@@ -121,6 +136,10 @@ class DiscoveryLoop:
             "archive_coverage": self.archive.coverage(),
             "lessons": self.store.lesson_count(),
             "sr_trial_std": None if sr_std is None else round(sr_std, 5),
+            "edge_t_median": None if not edge_t else round(float(np.median(edge_t)), 4),
+            "edge_t_best": None if not edge_t else round(float(np.max(edge_t)), 4),
+            "dsr_z_best": None if not dsr_z else round(float(np.max(dsr_z)), 4),
+            "n_backtested": len(edge_t),
         }
 
     # ─── engines ─────────────────────────────────────────────────────────

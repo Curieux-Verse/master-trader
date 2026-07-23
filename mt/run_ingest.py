@@ -25,8 +25,9 @@ def main():
     ap.add_argument("--markets", default="crypto,fx,xau")
     ap.add_argument("--bars", type=int, default=1500)
     ap.add_argument("--snapshot-id", default="real")
-    ap.add_argument("--top-n", type=int, default=50,
-                    help="crypto: number of top-volume perps to ingest (dynamic universe)")
+    ap.add_argument("--top-n", type=int, default=100,
+                    help="crypto: number of top-volume perps to ingest (wider cross-section = more "
+                         "statistical power for the rank book; 100 default, 150+ fine)")
     ap.add_argument("--deep-months", type=int, default=0,
                     help="crypto: extend HTF history via N months of bulk dumps (0 = REST only)")
     ap.add_argument("--flow-days", type=int, default=0,

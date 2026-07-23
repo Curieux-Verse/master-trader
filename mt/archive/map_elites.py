@@ -22,6 +22,7 @@ def niche_key(market: str, descriptor: dict) -> str:
         str(descriptor.get("hold_bucket", "?")),
         str(descriptor.get("turnover_bucket", "?")),
         str(descriptor.get("exposure_bucket", "?")),
+        str(descriptor.get("regime", "all")),          # regime as a diversity axis (docs/06)
     ])
 
 

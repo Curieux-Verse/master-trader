@@ -47,9 +47,11 @@ class TemplateSampler:
     def _archetype(self, market: str, kind: str) -> Genome:
         rng = self.rng
         h = int(rng.integers(4, 13))
-        blend = SignalSpec("weighted_blend", {"direction": "neutral"})
-        gate = lambda d="long_bias", t=(0.3, 1.0): SignalSpec("gated_and", {"threshold": round(float(rng.uniform(*t)), 2), "direction": d})
-        gor = lambda d="long_bias", t=(0.3, 1.0): SignalSpec("gated_or", {"threshold": round(float(rng.uniform(*t)), 2), "direction": d})
+        # weighted toward 'all' (~57%) so the search keeps both unconditional and regime-conditioned
+        reg = lambda: ("all", "all", "all", "low_vol", "high_vol", "trend", "chop")[int(rng.integers(7))]
+        blend = SignalSpec("weighted_blend", {"direction": "neutral", "regime": reg()})
+        gate = lambda d="long_bias", t=(0.3, 1.0): SignalSpec("gated_and", {"threshold": round(float(rng.uniform(*t)), 2), "direction": d, "regime": reg()})
+        gor = lambda d="long_bias", t=(0.3, 1.0): SignalSpec("gated_or", {"threshold": round(float(rng.uniform(*t)), 2), "direction": d, "regime": reg()})
 
         if kind in ("dir_trend", "dir_revert", "dir_breakout"):
             return self._directional(market, kind)
@@ -104,18 +106,19 @@ class TemplateSampler:
     # ─── directional (Tier-2, triple-barrier) archetypes ─────────────────
     def _directional(self, market: str, kind: str) -> Genome:
         rng = self.rng
+        reg = ("all", "all", "all", "low_vol", "high_vol", "trend", "chop")[int(rng.integers(7))]
         if kind == "dir_trend":
             feats = [self._fn(1, "momentum", lookback=int(rng.integers(40, 140)), skip=1),
                      self._fn(2, "adx", window=int(rng.integers(10, 28)))]
-            sig = SignalSpec("weighted_blend", {"direction": "long_bias" if rng.random() < 0.6 else "neutral"})
+            sig = SignalSpec("weighted_blend", {"direction": "long_bias" if rng.random() < 0.6 else "neutral", "regime": reg})
         elif kind == "dir_revert":
             feats = [self._fn(1, "rsi", window=int(rng.integers(7, 21))),
                      self._fn(2, "bb_position", window=int(rng.integers(15, 40)), mult=2.0)]
-            sig = SignalSpec("weighted_blend", {"direction": "neutral"})
+            sig = SignalSpec("weighted_blend", {"direction": "neutral", "regime": reg})
         else:  # dir_breakout
             feats = [self._fn(1, "breakout", window=int(rng.integers(30, 90))),
                      self._fn(2, "atr_expansion", window=int(rng.integers(20, 60)))]
-            sig = SignalSpec("gated_or", {"threshold": round(float(rng.uniform(0.4, 1.0)), 2), "direction": "long_bias"})
+            sig = SignalSpec("gated_or", {"threshold": round(float(rng.uniform(0.4, 1.0)), 2), "direction": "long_bias", "regime": reg})
         siz = SizingSpec("fixed_fractional", {"f": round(float(rng.uniform(0.05, 0.2)), 2)})
         risk = RiskSpec("triple_barrier", {"entry_thr": round(float(rng.uniform(0.4, 1.0)), 2),
                                            "sl_mult": round(float(rng.uniform(1.0, 2.5)), 2),

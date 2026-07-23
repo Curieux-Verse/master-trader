@@ -165,8 +165,10 @@ class Genome:
             for f in self.features
         )
         direction = self.signal.args.get("direction", "neutral")
+        regime = self.signal.args.get("regime", "all")
+        cond = f" ({direction})" if regime in ("all", None) else f" ({direction}, regime={regime})"
         lines = [
-            f"[{self.meta.market}] {self.signal.op} ({direction}) on {self.meta.htf}",
+            f"[{self.meta.market}] {self.signal.op}{cond} on {self.meta.htf}",
             f"  features: {feat or '(none)'}",
             f"  sizing:   {self.sizing.op}(" +
             ", ".join(f"{k}={v}" for k, v in self.sizing.args.items()) + ")",

@@ -73,7 +73,7 @@ class Tier2Executor:
         if not feat_z:
             res.error = "no_valid_features"; return res
 
-        sig = self._signal(genome, feat_z, close)
+        sig = self._signal(genome, feat_z, close, panel, tf)
 
         r = genome.risk.args
         entry_thr = float(r.get("entry_thr", 0.6))
@@ -107,8 +107,13 @@ class Tier2Executor:
         res.behavioral_descriptor = self._descriptor(bars_held, sides, genome)
         return res
 
-    def _signal(self, genome: Genome, feat_z: Dict[str, pd.DataFrame], grid: pd.DataFrame) -> pd.DataFrame:
+    def _signal(self, genome: Genome, feat_z: Dict[str, pd.DataFrame], grid: pd.DataFrame,
+                panel: NormPanel = None, tf: str = None) -> pd.DataFrame:
         direction = genome.signal.args.get("direction", "neutral")
+        regime = genome.signal.args.get("regime", "all")
+        mask = F.regime_mask(panel, tf, regime) if panel is not None else None
+        if mask is not None:
+            mask = mask.reindex(index=grid.index, columns=grid.columns).fillna(False)
         if genome.signal.op in ("gated_and", "gated_or"):
             thr = float(genome.signal.args.get("threshold", 0.5))
             use_or = genome.signal.op == "gated_or"
@@ -118,13 +123,15 @@ class Tier2Executor:
                 g = (z < -thr) if short else (z > thr)
                 gate = g if gate is None else ((gate | g) if use_or else (gate & g))
             mat = gate.astype(float) if gate is not None else grid * 0.0
-            return (-mat if short else mat).reindex(index=grid.index, columns=grid.columns).fillna(0.0)
+            out = (-mat if short else mat).reindex(index=grid.index, columns=grid.columns).fillna(0.0)
+            return out if mask is None else out.where(mask, 0.0)     # no entries out of regime
         blended = np.tanh(sum(z.fillna(0.0) for z in feat_z.values()) / max(1, len(feat_z)))
         if direction == "long_bias":
             blended = blended.clip(lower=0.0)
         elif direction == "short_bias":
             blended = blended.clip(upper=0.0)
-        return blended.reindex(index=grid.index, columns=grid.columns).fillna(0.0)
+        out = blended.reindex(index=grid.index, columns=grid.columns).fillna(0.0)
+        return out if mask is None else out.where(mask, 0.0)
 
     def _summarize(self, net: pd.Series, bars_held: List[int], tf: str) -> dict:
         # Annualize by NON-OVERLAPPING holding periods per year (bars_per_year / avg_hold), exactly
@@ -154,6 +161,7 @@ class Tier2Executor:
         net_side = float(np.mean(sides)) if sides else 0.0
         expo = "long" if net_side > 0.2 else "short" if net_side < -0.2 else "both"
         return {"hold_bucket": hold, "turnover_bucket": "trade", "exposure_bucket": expo,
+                "regime": genome.signal.args.get("regime", "all"),   # regime niche axis (docs/06)
                 "median_holding_bars": int(avg_hold), "phenotype": "directional",
                 "complexity": genome.complexity()}
 

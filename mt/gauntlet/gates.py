@@ -87,7 +87,8 @@ def g4_deflated_sharpe(net: pd.Series, trial_count: int, ann_factor: float = 365
     passed = sig and raw > 0 and (pval is not None and pval < DSR_PVALUE_MAX)
     reason = "" if passed else f"raw_sharpe={raw:.2f}, dsr_p={pval}, trials={trial_count} — not significant"
     return GateResult("G4_deflated_sharpe", "pass" if passed else "fail",
-                      {"raw_sharpe": raw, "dsr_pvalue": pval, "is_significant": sig,
+                      {"raw_sharpe": raw, "dsr_pvalue": pval, "dsr_z": dsr.get("dsr_z_score"),
+                       "expected_max_sr": dsr.get("expected_max_sr"), "is_significant": sig,
                        "trial_count": trial_count, "engine": dsr.get("engine")}, reason)
 
 

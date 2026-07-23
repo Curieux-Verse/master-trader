@@ -306,20 +306,24 @@ register(OpSpec("vol_regime_tag", "feature", {"tiers": ArgSpec("int", 3, 5, defa
                 doc="volatility-regime percentile in [-1,1] (model-free vol tier)"))
 
 # ── §4 signal ops ──
+_REGIME = ArgSpec("choice", choices=("all", "low_vol", "high_vol", "trend", "chop"), default="all")
 register(OpSpec("weighted_blend", "signal",
-                {"direction": ArgSpec("choice", choices=("long_bias", "short_bias", "neutral"), default="neutral")},
+                {"direction": ArgSpec("choice", choices=("long_bias", "short_bias", "neutral"), default="neutral"),
+                 "regime": _REGIME},
                 output="Signal", inputs=("Series[zscore]",), tags=("blend",), computable=True,
-                doc="row z-score sum of features"))
+                doc="row z-score sum of features, optionally conditioned to a regime"))
 register(OpSpec("gated_and", "signal",
                 {"threshold": ArgSpec("float", 0.0, 2.0, default=0.5),
-                 "direction": ArgSpec("choice", choices=("long_bias", "short_bias"), default="long_bias")},
+                 "direction": ArgSpec("choice", choices=("long_bias", "short_bias"), default="long_bias"),
+                 "regime": _REGIME},
                 output="Signal", inputs=("Series[zscore]",), tags=("logic", "gate"), computable=True,
-                doc="long/short only where EVERY feature clears a z-threshold"))
+                doc="long/short only where EVERY feature clears a z-threshold, optionally regime-gated"))
 register(OpSpec("gated_or", "signal",
                 {"threshold": ArgSpec("float", 0.0, 2.0, default=0.7),
-                 "direction": ArgSpec("choice", choices=("long_bias", "short_bias"), default="long_bias")},
+                 "direction": ArgSpec("choice", choices=("long_bias", "short_bias"), default="long_bias"),
+                 "regime": _REGIME},
                 output="Signal", inputs=("Series[zscore]",), tags=("logic", "gate"), computable=True,
-                doc="long/short where ANY feature clears a z-threshold"))
+                doc="long/short where ANY feature clears a z-threshold, optionally regime-gated"))
 
 # ── §5 sizing ops ──
 register(OpSpec("rank_bucket", "sizing",

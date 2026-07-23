@@ -39,9 +39,25 @@ class EngineBandit:
         draws = {e: self.rng.beta(self.alpha[e], self.beta[e]) for e in self.engines}
         return max(draws, key=draws.get)
 
-    def allocate(self, n: int) -> Dict[str, int]:
+    def allocate(self, n: int, floors: Dict[str, float] = None) -> Dict[str, int]:
         picks = Counter(self.sample_engine() for _ in range(max(1, n)))
-        return {e: picks.get(e, 0) for e in self.engines}
+        alloc = {e: picks.get(e, 0) for e in self.engines}
+        if floors:                                           # guarantee a targeted-engine minimum
+            for e, frac in floors.items():
+                if e not in alloc:
+                    continue
+                need = int(np.ceil(frac * max(1, n)))
+                deficit = need - alloc[e]
+                if deficit <= 0:
+                    continue
+                donors = sorted((x for x in self.engines if x not in floors),
+                                key=lambda x: -alloc[x])
+                for d in donors:
+                    take = min(deficit, alloc[d])
+                    alloc[d] -= take; alloc[e] += take; deficit -= take
+                    if deficit <= 0:
+                        break
+        return alloc
 
     def update(self, engine: str, reward: float) -> None:
         reward = float(max(0.0, min(1.0, reward)))

@@ -26,6 +26,32 @@ def _close(panel: NormPanel, tf: Optional[str]) -> pd.DataFrame:
     return panel.close_matrix(tf)
 
 
+# ─── regime classifier (the conditioning axis, docs/06) ──────────────────
+# Turns "feature X" into "feature X *when* regime Y" — the highest-leverage way an
+# unconditional-noise signal becomes a conditional edge. Pure trailing OHLCV ⇒ PIT-safe.
+REGIMES = ("all", "low_vol", "high_vol", "trend", "chop")
+
+
+def regime_mask(panel: NormPanel, tf: str, regime: str) -> Optional[pd.DataFrame]:
+    """Boolean [time × symbol] mask (True = bar is IN the named regime), or None for 'all'.
+    Percentile-ranked against each symbol's own trailing history, so it is self-calibrating."""
+    if regime in (None, "", "all"):
+        return None
+    close = _close(panel, tf)
+    if close.empty:
+        return None
+    rv = close.pct_change().rolling(48, min_periods=12).std()
+    if regime in ("low_vol", "high_vol"):
+        pct = rv.rolling(200, min_periods=50).rank(pct=True)
+        return (pct < 0.40) if regime == "low_vol" else (pct > 0.60)
+    if regime in ("trend", "chop"):
+        mom = close.pct_change().rolling(20, min_periods=6).mean()
+        strength = (mom.abs() / rv.replace(0, np.nan))          # |drift| in vol units → trendiness
+        pct = strength.rolling(200, min_periods=50).rank(pct=True)
+        return (pct > 0.55) if regime == "trend" else (pct < 0.45)
+    return None
+
+
 def momentum(panel: NormPanel, args: dict, tf: str) -> pd.DataFrame:
     lb = int(args.get("lookback", 84)); skip = int(args.get("skip", 1))
     close = _close(panel, tf)

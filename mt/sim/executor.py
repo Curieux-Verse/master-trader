@@ -84,7 +84,7 @@ class Tier1Executor:
             res.error = "no_valid_features"
             return res
 
-        mode, matrix = self._signal(genome, feat_z, close)
+        mode, matrix = self._signal(genome, feat_z, close, panel, tf)
 
         # ── non-overlapping horizon backtest ─────────────────────────────
         horizon = int(genome.risk.args.get("horizon", 6))
@@ -150,8 +150,14 @@ class Tier1Executor:
         return res
 
     # ── signal combination ───────────────────────────────────────────────
-    def _signal(self, genome: Genome, feat_z: Dict[str, pd.DataFrame], grid: pd.DataFrame) -> Tuple[str, pd.DataFrame]:
+    def _signal(self, genome: Genome, feat_z: Dict[str, pd.DataFrame], grid: pd.DataFrame,
+                panel: NormPanel = None, tf: str = None) -> Tuple[str, pd.DataFrame]:
         direction = genome.signal.args.get("direction", "neutral")
+        regime = genome.signal.args.get("regime", "all")
+        mask = F.regime_mask(panel, tf, regime) if panel is not None else None
+        if mask is not None:
+            mask = mask.reindex(index=grid.index, columns=grid.columns).fillna(False)
+
         if genome.signal.op in ("gated_and", "gated_or"):
             thr = float(genome.signal.args.get("threshold", 0.5))
             use_or = genome.signal.op == "gated_or"
@@ -166,7 +172,10 @@ class Tier1Executor:
             mat = gate.astype(float) if gate is not None else grid * 0.0
             if short:
                 mat = -mat
-            return "gated", mat.reindex(index=grid.index, columns=grid.columns).fillna(0.0)
+            mat = mat.reindex(index=grid.index, columns=grid.columns).fillna(0.0)
+            if mask is not None:                             # out-of-regime bars are not tradable
+                mat = mat.where(mask, 0.0)
+            return "gated", mat
 
         # weighted_blend: equal-weight z-score sum (the honest v1 blend)
         total = sum(z.fillna(0.0) for z in feat_z.values())
@@ -174,6 +183,8 @@ class Tier1Executor:
         alpha = total / counts.replace(0, np.nan)
         if direction == "short_bias":
             alpha = -alpha
+        if mask is not None:                                 # NaN ⇒ dropped from the ranked cross-section
+            alpha = alpha.where(mask, np.nan)
         return "dense", alpha
 
     # ── weighting ─────────────────────────────────────────────────────────
@@ -251,6 +262,7 @@ class Tier1Executor:
         expo = "neutral" if abs(net_e) < 0.1 else ("long" if net_e > 0 else "short")
         return {
             "hold_bucket": hold, "turnover_bucket": turn_bucket, "exposure_bucket": expo,
+            "regime": genome.signal.args.get("regime", "all"),   # regime niche axis (docs/06)
             "median_holding_bars": int(horizon), "avg_turnover": avg_turn, "net_exposure": net_e,
             "complexity": genome.complexity(),
         }

@@ -23,13 +23,15 @@ from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
 
+import numpy as np
+
 from mt.config import DB_PATH, RUNS_DIR, MARKETS, DEFAULT_SEED
 from mt.adapters import MarketAdapter
 from mt.data.lake import read_lake_panel, lake_has_data, snapshot_info
 from mt.store import MTStore
 from mt.improve import DiscoveryLoop
 from mt.live import PaperBook
-from mt.live.report import format_system_report, send_telegram
+from mt.live.report import format_system_report, format_telegram_report, send_telegram
 
 
 def _build_panels(market, source, snapshot_id, seed, structure):
@@ -104,13 +106,22 @@ def run_system(markets, generations: int, batch_size: int, seed: int, structure:
     # ── INNER LOOP: discovery across all markets, generation by generation ──
     print(f"\n{'─'*72}\n INNER LOOP — {generations} generations × {len(markets)} markets\n{'─'*72}")
     fam_all: Counter = Counter(); pheno_all: Counter = Counter(); last_bandit = {}
+    z_trend = []                        # per-gen: N-independent edge_t (learning) + best DSR-z (distance)
     for gen in range(generations):
-        line = []
+        line = []; gen_e = []; gen_zbest = []
         for m in markets:
             st = loops[m].run_generation(batch_size=batch_size)
             fam_all.update(st["families_tested"]); pheno_all.update(st["phenotypes_tested"])
             last_bandit[m] = st["bandit_weights"]
-            line.append(f"{m}:arch{st['archive_coverage']}")
+            if st.get("edge_t_median") is not None:
+                gen_e.append(st["edge_t_median"])
+            if st.get("dsr_z_best") is not None:
+                gen_zbest.append(st["dsr_z_best"])
+            et = st.get("edge_t_median")
+            line.append(f"{m}:arch{st['archive_coverage']}" + ("" if et is None else f"(t̃{et:+.2f})"))
+        emed = float(np.median(gen_e)) if gen_e else None
+        zbest = max(gen_zbest) if gen_zbest else None
+        z_trend.append({"gen": gen + 1, "edge_t_median": emed, "z_best": zbest})
         print(f"  gen {gen+1:2}: " + "  ".join(line) +
               f"   | ledger N={store.trial_count()}  lessons={store.lesson_count()}")
 
@@ -122,6 +133,7 @@ def run_system(markets, generations: int, batch_size: int, seed: int, structure:
         "generations": generations, "evaluated": evaluated, "admitted": passed, "rejected": rejected,
         "reject_rate": rejected / max(1, passed + rejected), "n_families": len(fam_all),
         "phenotypes": dict(pheno_all), "bandit": last_bandit.get(markets[0], {}),
+        **_convergence(z_trend),
     }
 
     # ── archive snapshot ──
@@ -164,12 +176,56 @@ def run_system(markets, generations: int, batch_size: int, seed: int, structure:
     }
     text = format_system_report(rep)
     print("\n" + text)
-    send_telegram(text)
+    send_telegram(format_telegram_report(rep))          # clean, emoji, mobile-first HTML digest
     out = RUNS_DIR / f"system_{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}.json"
     out.write_text(json.dumps(rep, indent=2))
     print(f"\n  full report saved: {out}\n  elapsed: {rep['elapsed_s']}s")
     store.close()
     return rep
+
+
+_MIN_GENS_FOR_TREND = 8
+
+
+def _convergence(z_trend: list) -> dict:
+    """Steering verdict — WHICH wall are we on? Two signals, and the DISTINCTION matters:
+
+      • best-z (the DISCOVERY signal): how close the single best genome is to clearing G4. This is
+        the tail we actually care about (z=0 is the luck bar; a pass needs z ≳ 1.64).
+      • median edge-t (the EXPLORATION FLOOR): the *typical* genome's single-strategy t-stat. Most
+        genomes are random/exploratory, so this sits near zero *by construction* on an efficient
+        market — it is NOT a quality score, and a few noisy points must not be read as a trend.
+
+    So the verdict needs ≥8 generations and a noise-aware dead-band; below that we refuse to call
+    it. The median is judged by a least-squares slope vs its own scatter, never a 2-point delta."""
+    pts = [(t["gen"], t["edge_t_median"]) for t in z_trend if t.get("edge_t_median") is not None]
+    best_z = max((t["z_best"] for t in z_trend if t.get("z_best") is not None), default=None)
+    # is the BEST improving? compare the best-z of the recent half vs the early half
+    zb = [t["z_best"] for t in z_trend if t.get("z_best") is not None]
+    best_recent = max(zb[len(zb) // 2:], default=None) if zb else None
+    best_early = max(zb[:len(zb) // 2], default=None) if len(zb) > 1 else None
+    out = {"trend": z_trend, "dsr_z_best": best_z,
+           "dsr_gap_to_significance": None if best_z is None else round(1.645 - best_z, 3),
+           "best_z_recent": best_recent, "best_z_early": best_early}
+    if len(pts) < _MIN_GENS_FOR_TREND:
+        out["convergence"] = (f"warming up ({len(pts)} gen) — too few to call a trend (per-gen medians "
+                              f"are noisy); watch best-z, and run mt.run_continuous for many generations")
+        return out
+    gens = np.array([g for g, _ in pts], float); vals = np.array([v for _, v in pts], float)
+    slope = float(np.polyfit(gens, vals, 1)[0])
+    span = slope * (gens[-1] - gens[0])                       # total drift the fit implies
+    band = max(0.15, 0.6 * float(vals.std()))                # dead-band scaled to the scatter
+    out["edge_t_slope_per_gen"] = round(slope, 4)
+    if abs(span) < band:
+        out["convergence"] = ("FLOOR STEADY — median edge sits at the noise floor (expected on an "
+                              "efficient space); judge progress by best-z, and feed new data/conditioning")
+    elif span > 0:
+        out["convergence"] = (f"LEARNING — median edge rising ({span:+.2f} over {len(pts)} gens); "
+                              f"generation is improving, scale compute")
+    else:
+        out["convergence"] = (f"SOFTENING — median edge easing ({span:+.2f}); usually just exploration "
+                              f"noise — judge by best-z, not the median")
+    return out
 
 
 def _pretty_lessons(raw):

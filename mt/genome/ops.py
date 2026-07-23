@@ -35,7 +35,8 @@ def _feature_ops_for(market: str) -> List:
 def mutate(g: Genome, rng: np.random.Generator) -> Genome:
     """Perturb exactly one node/arg within registry bounds (docs/03 §2)."""
     child = copy.deepcopy(g)
-    choices = ["arg", "swap_feature", "add_feature", "remove_feature", "signal_dir", "sizing_arg", "risk_arg"]
+    choices = ["arg", "swap_feature", "add_feature", "remove_feature", "signal_dir",
+               "signal_regime", "sizing_arg", "risk_arg"]
     if len(child.features) <= 1:
         choices = [c for c in choices if c != "remove_feature"]
     move = choices[int(rng.integers(len(choices)))]
@@ -62,6 +63,10 @@ def mutate(g: Genome, rng: np.random.Generator) -> Genome:
         spec = REGISTRY[child.signal.op]
         if "direction" in spec.args:
             child.signal.args["direction"] = spec.args["direction"].sample(rng)
+    elif move == "signal_regime":                        # explore regime conditioning (docs/06)
+        spec = REGISTRY[child.signal.op]
+        if "regime" in spec.args:
+            child.signal.args["regime"] = spec.args["regime"].sample(rng)
     elif move == "sizing_arg":
         spec = REGISTRY[child.sizing.op]
         if spec.args:
