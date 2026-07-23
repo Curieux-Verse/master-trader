@@ -34,6 +34,11 @@ class IngestResult:
     frames: int
 
 
+def _us(series) -> pd.Series:
+    """Normalize a datetime series to UTC microsecond resolution (merge_asof needs matching units)."""
+    return pd.to_datetime(series, utc=True).dt.as_unit("us")
+
+
 def _tf_minutes(tf: str) -> int:
     tf = tf.strip()
     unit, val = (tf[-1].lower(), int(tf[:-1])) if tf[0].isdigit() else (tf[0].lower(), int(tf[1:] or 1))
@@ -65,9 +70,10 @@ def enrich_footprint(market: str, snapshot_id: str = "real", symbols: Optional[L
         if fp.empty:
             continue
         df = pd.read_parquet(f["path"])
-        df["datetime"] = pd.to_datetime(df["datetime"], utc=True)
+        df["datetime"] = _us(df["datetime"])
         df = df.drop(columns=[c for c in ("fp_stacked", "fp_absorption") if c in df.columns], errors="ignore")
         fpm = fp.rename(columns={"stacked_imbalance": "fp_stacked", "absorption": "fp_absorption"})
+        fpm["datetime"] = _us(fpm["datetime"])
         merged = pd.merge_asof(df.sort_values("datetime"),
                                fpm[["datetime", "fp_stacked", "fp_absorption"]].sort_values("datetime"),
                                on="datetime", direction="backward", tolerance=pd.Timedelta(minutes=tf_min))
@@ -96,22 +102,29 @@ def enrich_macro(market: str, snapshot_id: str = "real", symbols: Optional[List[
     for f in manifest.get("frames", []):
         if f["tf"] != m.htf or f["symbol"] not in syms:
             continue
-        cotdf = cot_mod.fetch_cot_z(f["symbol"]) if do_cot else None
-        newsdf = news_mod.fetch_news_tone(f["symbol"], months) if do_news else None
-        if cotdf is None and newsdf is None:
+        try:
+            cotdf = cot_mod.fetch_cot_z(f["symbol"]) if do_cot else None
+            newsdf = news_mod.fetch_news_tone(f["symbol"], months) if do_news else None
+            if cotdf is None and newsdf is None:
+                continue
+            df = pd.read_parquet(f["path"])
+            df["datetime"] = _us(df["datetime"])
+            df = df.drop(columns=[c for c in ("cot_z", "news_tone") if c in df.columns],
+                         errors="ignore").sort_values("datetime")
+            if cotdf is not None:
+                cotdf = cotdf.copy(); cotdf["datetime"] = _us(cotdf["datetime"])
+                df = pd.merge_asof(df, cotdf.sort_values("datetime"), on="datetime", direction="backward")
+            if newsdf is not None:
+                newsdf = newsdf.copy(); newsdf["datetime"] = _us(newsdf["datetime"])
+                df = pd.merge_asof(df, newsdf.sort_values("datetime"), on="datetime", direction="backward")
+            for c in FRAME_COLS:
+                if c not in df.columns:
+                    df[c] = np.nan
+            df[FRAME_COLS].to_parquet(f["path"], index=False)
+            enriched += 1
+        except Exception as e:
+            log(f"    [{market}] {f['symbol']}: macro enrich error ({type(e).__name__}: {str(e)[:60]})")
             continue
-        df = pd.read_parquet(f["path"])
-        df["datetime"] = pd.to_datetime(df["datetime"], utc=True)
-        df = df.drop(columns=[c for c in ("cot_z", "news_tone") if c in df.columns], errors="ignore").sort_values("datetime")
-        if cotdf is not None:
-            df = pd.merge_asof(df, cotdf.sort_values("datetime"), on="datetime", direction="backward")
-        if newsdf is not None:
-            df = pd.merge_asof(df, newsdf.sort_values("datetime"), on="datetime", direction="backward")
-        for c in FRAME_COLS:
-            if c not in df.columns:
-                df[c] = np.nan
-        df[FRAME_COLS].to_parquet(f["path"], index=False)
-        enriched += 1
         tags = []
         if cotdf is not None and "cot_z" in df:
             tags.append(f"cot({int(df['cot_z'].notna().sum())})")
