@@ -297,6 +297,9 @@ register(OpSpec("cot_zscore", "feature", {"window": _win(26, 4, 104)},
 register(OpSpec("news_sentiment", "feature", {"window": _win(24, 4, 168)}, output="Series[zscore]",
                 data_requires=("news",), cost_class="medium", tags=("sentiment", "macro"), computable=True,
                 doc="GDELT news tone (from enriched news_tone column)"))
+register(OpSpec("event_surprise", "feature", {"window": _win(12, 2, 72)}, output="Series[zscore]",
+                data_requires=("calendar",), cost_class="cheap", tags=("macro", "calendar", "event"),
+                computable=True, doc="economic-event surprise (ForexFactory/MetalsMine/CryptoCraft)"))
 register(OpSpec("vol_regime_tag", "feature", {"tiers": ArgSpec("int", 3, 5, default=4)},
                 output="Series[zscore]", cost_class="medium",
                 tags=("regime", "ml_derived"), computable=True,

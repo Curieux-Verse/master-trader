@@ -497,6 +497,16 @@ def news_sentiment(panel: NormPanel, args: dict, tf: str) -> pd.DataFrame:
     return nt.rolling(w, min_periods=1).mean()
 
 
+def event_surprise(panel: NormPanel, args: dict, tf: str) -> pd.DataFrame:
+    """Economic-event surprise (impact-weighted actual-vs-forecast) from the FairEconomy
+    calendars (ForexFactory / MetalsMine / CryptoCraft), via the enriched cal_surprise column."""
+    w = int(args.get("window", 12))
+    cs = panel.field_matrix("cal_surprise", tf)
+    if cs.empty or not cs.notna().any().any():
+        return _close(panel, tf) * np.nan
+    return cs.rolling(w, min_periods=1).mean()
+
+
 BUILDERS: Dict[str, Callable[[NormPanel, dict, str], pd.DataFrame]] = {
     # classical
     "momentum": momentum, "reversion": reversion, "ema_dist": ema_dist, "rsi": rsi,
@@ -527,6 +537,7 @@ BUILDERS: Dict[str, Callable[[NormPanel, dict, str], pd.DataFrame]] = {
     # the last five: pattern / SMC OB / vol-regime / COT / news
     "candlestick_pattern": candlestick_pattern, "order_block_strength": order_block_strength,
     "vol_regime_tag": vol_regime_tag, "cot_zscore": cot_zscore, "news_sentiment": news_sentiment,
+    "event_surprise": event_surprise,
 }
 
 

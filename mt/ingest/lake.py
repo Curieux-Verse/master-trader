@@ -134,6 +134,47 @@ def enrich_macro(market: str, snapshot_id: str = "real", symbols: Optional[List[
     return enriched
 
 
+def enrich_calendar(market: str, snapshot_id: str = "real", symbols: Optional[List[str]] = None,
+                    log=print) -> int:
+    """Attach FairEconomy event surprise (cal_surprise) to recent HTF bars. Source is fetched
+    once per market (ForexFactory/MetalsMine/CryptoCraft); events persist up to 3 days."""
+    import json
+    from mt.ingest import calendar as cal_mod
+    m = MARKETS[market]
+    man_path = LAKE_DIR / snapshot_id / market / "_snapshot.json"
+    if not man_path.exists():
+        log(f"    [{market}] no lake snapshot."); return 0
+    manifest = json.loads(man_path.read_text())
+    events = cal_mod.fetch_source(m.kind)
+    if events is None or events.empty:
+        log(f"    [{market}] no calendar events for source."); return 0
+    syms = symbols or manifest.get("symbols", [])
+    enriched = 0
+    for f in manifest.get("frames", []):
+        if f["tf"] != m.htf or f["symbol"] not in syms:
+            continue
+        try:
+            sig = cal_mod.signal_from_events(events, f["symbol"], m.kind)
+            if sig is None or sig.empty:
+                continue
+            df = pd.read_parquet(f["path"])
+            df["datetime"] = _us(df["datetime"])
+            df = df.drop(columns=[c for c in ("cal_surprise",) if c in df.columns], errors="ignore").sort_values("datetime")
+            sig = sig.copy(); sig["datetime"] = _us(sig["datetime"])
+            df = pd.merge_asof(df, sig.sort_values("datetime"), on="datetime", direction="backward",
+                               tolerance=pd.Timedelta(days=3))
+            for c in FRAME_COLS:
+                if c not in df.columns:
+                    df[c] = np.nan
+            df[FRAME_COLS].to_parquet(f["path"], index=False)
+            enriched += 1
+            log(f"    [{market}] {f['symbol']}: cal_surprise on {int(df['cal_surprise'].notna().sum())} bars")
+        except Exception as e:
+            log(f"    [{market}] {f['symbol']}: calendar error ({type(e).__name__}: {str(e)[:50]})")
+            continue
+    return enriched
+
+
 def _atr(df: pd.DataFrame, window: int = 14) -> np.ndarray:
     high, low, close = df["high"].to_numpy(), df["low"].to_numpy(), df["close"].to_numpy()
     prev = np.concatenate([[close[0]], close[:-1]])

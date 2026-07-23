@@ -24,7 +24,7 @@ def available_feeds(market: str) -> set:
     if m.kind == "crypto":
         feeds.add("taker_buy")           # Binance klines carry taker-buy volume + trade count
     feeds.add("cross_asset")             # ingest attaches a benchmark ref_close (BTC / gold)
-    feeds.update({"cot", "news"})        # COT + GDELT enrich mapped symbols over deep history
+    feeds.update({"cot", "news", "calendar"})   # COT + GDELT + FairEconomy calendars
     return feeds
 
 

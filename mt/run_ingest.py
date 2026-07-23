@@ -34,6 +34,8 @@ def main():
     ap.add_argument("--flow-symbols", type=int, default=8, help="how many top symbols to footprint-enrich")
     ap.add_argument("--macro", action="store_true",
                     help="enrich mapped symbols with CFTC COT positioning + GDELT news tone (deep)")
+    ap.add_argument("--calendar", action="store_true",
+                    help="enrich with FairEconomy event surprise (ForexFactory/MetalsMine/CryptoCraft)")
     args = ap.parse_args()
     markets = [m.strip() for m in args.markets.split(",") if m.strip()]
 
@@ -71,6 +73,13 @@ def main():
             print(f"\n[{m}] enriching mapped symbols with CFTC COT + GDELT news (deep)…")
             n = enrich_macro(m, snapshot_id=args.snapshot_id)
             print(f"   → macro attached to {n} symbol frames")
+
+    if args.calendar:
+        from mt.ingest.lake import enrich_calendar
+        for m in markets:
+            print(f"\n[{m}] enriching with FairEconomy event surprise…")
+            n = enrich_calendar(m, snapshot_id=args.snapshot_id)
+            print(f"   → calendar attached to {n} symbol frames")
 
     print("\n" + "=" * 70)
     print(" LAKE READY")
