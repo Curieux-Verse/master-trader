@@ -2,7 +2,12 @@ name: ingest-lake
 
 # Builds the real, content-hashed data lake from the free feeds and caches it for the
 # marathon. Crypto (Binance) needs no auth; FX/gold need the OANDA_API_KEY repo secret.
-# Run this ONCE manually before the first marathon, then it refreshes weekly.
+#
+# TRIGGERING: fire it from an EXTERNAL scheduler (e.g. cron-job.org) via the GitHub API —
+#   POST https://api.github.com/repos/Curieux-Verse/master-trader/dispatches
+#   headers: Authorization: Bearer <PAT>,  Accept: application/vnd.github+json
+#   body:    {"event_type":"run-ingest"}   (optionally add client_payload markets/top_n/deep_months)
+# (or use the manual "Run workflow" button). Run once before the first marathon; refresh weekly.
 on:
   workflow_dispatch:
     inputs:
@@ -15,8 +20,8 @@ on:
       deep_months:
         description: "crypto: months of deep history via bulk dumps"
         default: "12"
-  schedule:
-    - cron: "0 4 * * 1" # Mondays 04:00 UTC
+  repository_dispatch:
+    types: [run-ingest]
 
 jobs:
   ingest:
@@ -36,11 +41,11 @@ jobs:
         env:
           OANDA_API_KEY: ${{ secrets.OANDA_API_KEY }}
         run: |
-          python -m mt.run_ingest \
-            --markets "${{ github.event.inputs.markets || 'crypto,fx,xau' }}" \
-            --top-n "${{ github.event.inputs.top_n || '100' }}" \
-            --deep-months "${{ github.event.inputs.deep_months || '12' }}" \
-            --macro --calendar --snapshot-id real
+          MARKETS="${{ github.event.inputs.markets || github.event.client_payload.markets || 'crypto,fx,xau' }}"
+          TOPN="${{ github.event.inputs.top_n || github.event.client_payload.top_n || '100' }}"
+          DEEP="${{ github.event.inputs.deep_months || github.event.client_payload.deep_months || '12' }}"
+          python -m mt.run_ingest --markets "$MARKETS" --top-n "$TOPN" \
+            --deep-months "$DEEP" --macro --calendar --snapshot-id real
       - name: Cache the lake for the marathon
         uses: actions/cache/save@v4
         with:

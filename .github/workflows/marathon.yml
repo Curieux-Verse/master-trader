@@ -1,10 +1,16 @@
 name: marathon
 
-# The unattended, self-improving discovery loop. Every 6h it restores the lake + the
-# accumulated "brain" (var/mt.db) from cache, runs discovery for a wall-clock budget, saves
-# the brain back, commits a human-readable digest to runs/, and pings Telegram. Because the
-# DB carries archive + lessons + minted vocabulary + bandit learning across runs, discovery
-# COMPOUNDS session to session — no machine needs to stay on. NO capital is ever placed.
+# The unattended, self-improving discovery loop. Restores the lake + the accumulated "brain"
+# (var/mt.db) from cache, runs discovery for a wall-clock budget, saves the brain back, commits
+# a human-readable digest to runs/, and pings Telegram. Because the DB carries archive + lessons
+# + minted vocabulary + bandit learning across runs, discovery COMPOUNDS session to session — no
+# machine needs to stay on. NO capital is ever placed.
+#
+# TRIGGERING: fire it from an EXTERNAL scheduler (e.g. cron-job.org) via the GitHub API —
+#   POST https://api.github.com/repos/Curieux-Verse/master-trader/dispatches
+#   headers: Authorization: Bearer <PAT>,  Accept: application/vnd.github+json
+#   body:    {"event_type":"run-marathon","client_payload":{"minutes":"300","reset":"false"}}
+# (or use the manual "Run workflow" button). No built-in schedule — the external cron owns cadence.
 on:
   workflow_dispatch:
     inputs:
@@ -14,8 +20,8 @@ on:
       reset:
         description: "start a FRESH brain (wipe accumulated var/mt.db) — true/false"
         default: "false"
-  schedule:
-    - cron: "0 */6 * * *" # every 6 hours
+  repository_dispatch:
+    types: [run-marathon]
 
 permissions:
   contents: write # commit the research-log digests back to the repo
@@ -66,11 +72,11 @@ jobs:
           SMC_CHAT_ID: ${{ secrets.SMC_CHAT_ID }}
           PYTHONIOENCODING: utf-8
         run: |
-          RESET=""
-          [ "${{ github.event.inputs.reset }}" = "true" ] && RESET="--reset"
+          MINUTES="${{ github.event.inputs.minutes || github.event.client_payload.minutes || '300' }}"
+          RESET_IN="${{ github.event.inputs.reset || github.event.client_payload.reset || 'false' }}"
+          RESET=""; [ "$RESET_IN" = "true" ] && RESET="--reset"
           python -m mt.run_continuous --source lake --snapshot-id real \
-            --generations 0 --max-minutes "${{ github.event.inputs.minutes || '300' }}" \
-            --report-every 10 $RESET
+            --generations 0 --max-minutes "$MINUTES" --report-every 10 $RESET
 
       - name: Save accumulated brain (db)
         if: always()
