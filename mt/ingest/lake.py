@@ -188,13 +188,18 @@ _BENCHMARK = {"crypto": "BTC/USDT:USDT", "fx": "XAU_USD", "xau": "XAU_USD"}   # 
 def _fetch(market: str, symbol: str, tf: str, bars: int, deep_months: int = 0,
            is_htf: bool = False) -> pd.DataFrame:
     if MARKETS[market].kind == "crypto":
-        if deep_months and is_htf:                           # deep HTF history via bulk dumps
+        if deep_months:                                      # deep history via bulk dumps (CDN, geo-safe)
+            if not is_htf:
+                return pd.DataFrame()                        # mtf/ltf unused by the sim + REST is geo-blocked
             df = binance_dumps.build_deep_klines(symbol, tf, months=deep_months)
-            fr = binance.fetch_funding(symbol)
-            if not df.empty and not fr.empty:
-                df = pd.merge_asof(df.sort_values("datetime"), fr, on="datetime", direction="backward")
+            if df is None or df.empty:
+                return df
+            fr = binance_dumps.fetch_funding_dumps(symbol, months=deep_months)   # funding via dumps (API blocked)
+            if not fr.empty:
+                df = pd.merge_asof(df.sort_values("datetime"), fr.sort_values("datetime"),
+                                   on="datetime", direction="backward")
             return df
-        return binance.build_frame(symbol, tf, limit=bars, with_funding=True)
+        return binance.build_frame(symbol, tf, limit=bars, with_funding=True)   # REST (local only)
     return oanda.build_frame(symbol, tf, count=bars)          # fx / metal → OANDA
 
 
@@ -205,11 +210,16 @@ def ingest_market(market: str, *, bars: int = 1500, snapshot_id: str = "real",
     tfs = {"htf": m.htf, "mtf": m.mtf, "ltf": m.ltf}
     if symbols is None and m.kind == "crypto":
         try:
-            symbols = binance.top_symbols_by_volume(top_n, coin_only=True)   # dynamic universe by $volume
-            log(f"    [{market}] universe: top {len(symbols)} crypto perps by 24h volume")
+            symbols = binance.top_symbols_by_volume(top_n, coin_only=True)   # dynamic universe by 24h $volume
+            log(f"    [{market}] universe: top {len(symbols)} crypto perps by 24h volume (API)")
         except Exception as e:
-            log(f"    [{market}] top-volume fetch failed ({type(e).__name__}); using config universe")
-            symbols = m.universe
+            log(f"    [{market}] 24h-volume API unavailable ({type(e).__name__}) — ranking via dump CDN…")
+            try:
+                symbols = binance_dumps.top_symbols_by_dump_volume(top_n)    # geo-safe fallback
+                log(f"    [{market}] universe: top {len(symbols)} perps by dump quote-volume")
+            except Exception as e2:
+                log(f"    [{market}] dump ranking failed ({type(e2).__name__}); using config universe")
+                symbols = m.universe
     syms = symbols or m.universe
     source = "binance_fapi" if m.kind == "crypto" else "oanda_v20"
     if deep_months:

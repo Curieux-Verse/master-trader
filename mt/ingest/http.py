@@ -34,9 +34,11 @@ def get_json(url: str, *, params: dict = None, headers: dict = None, timeout: fl
             if r.status_code == 200:
                 return r.json()
             if r.status_code in (418, 429) or r.status_code >= 500:
-                last = f"HTTP {r.status_code}"
+                last = f"HTTP {r.status_code}"                 # rate-limit / server error → retry
             else:
-                r.raise_for_status()
+                # non-retryable client error (403 / 404 / 451 geo-block / …): retrying is pointless
+                # and just wastes minutes, so fail immediately (RuntimeError skips the retry loop).
+                raise RuntimeError(f"GET {url} → HTTP {r.status_code} (non-retryable)")
         except requests.RequestException as e:
             last = f"{type(e).__name__}: {str(e)[:80]}"
         time.sleep(delay + random.uniform(0, 0.5 * delay))
