@@ -34,6 +34,21 @@ class EvalResult:
         d = self.behavioral_descriptor
         return [d.get("hold_bucket"), d.get("turnover_bucket"), d.get("exposure_bucket")]
 
+    def return_signature(self, k: int = 24) -> Optional[str]:
+        """A compact k-bucket, standardized signature of the P&L path. Two genomes whose returns
+        move together yield correlated signatures — the raw material for estimating the EFFECTIVE
+        number of independent trials that deflates the Sharpe (López de Prado, DSR Appendix 3)."""
+        r = np.asarray(self.net_returns.to_numpy(), dtype=float)
+        r = r[np.isfinite(r)]
+        if len(r) < k:
+            return None
+        idx = np.linspace(0, len(r), k + 1).astype(int)
+        sig = np.array([r[idx[i]:idx[i + 1]].mean() if idx[i + 1] > idx[i] else 0.0 for i in range(k)])
+        sd = float(sig.std())
+        if not np.isfinite(sd) or sd == 0:
+            return None
+        return ",".join(f"{v:.4f}" for v in (sig - sig.mean()) / sd)
+
     def to_ledger_row(self) -> dict:
         return {
             "genome_id": self.genome_id,
@@ -49,6 +64,7 @@ class EvalResult:
             "hit_rate": _f(self.summary.get("hit_rate")),
             "avg_turnover": _f(self.summary.get("avg_turnover")),
             "error": self.error or "",
+            "ret_sig": self.return_signature() or "",
         }
 
 

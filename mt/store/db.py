@@ -44,6 +44,7 @@ CREATE TABLE IF NOT EXISTS result_ledger (
     hit_rate     REAL,
     avg_turnover REAL,
     error        TEXT,
+    ret_sig      TEXT,
     created_at   REAL
 );
 CREATE INDEX IF NOT EXISTS ix_ledger_market ON result_ledger(market);
@@ -89,7 +90,17 @@ class MTStore:
         self.conn.row_factory = sqlite3.Row
         self.conn.execute("PRAGMA journal_mode=WAL;")
         self.conn.executescript(_SCHEMA)
+        self._migrate()
         self.conn.commit()
+
+    def _migrate(self) -> None:
+        """Additive migrations for brains created before a column existed (the cached marathon
+        DB predates ret_sig). Each ALTER is best-effort — a duplicate-column error means done."""
+        for table, col, decl in (("result_ledger", "ret_sig", "TEXT"),):
+            try:
+                self.conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {decl}")
+            except sqlite3.OperationalError:
+                pass
 
     def close(self):
         self.conn.close()
@@ -131,14 +142,52 @@ class MTStore:
         row = res.to_ledger_row()
         cur = self.conn.execute(
             "INSERT INTO result_ledger(genome_id,market,fidelity,seed,snapshot_id,n_periods,"
-            "net_sharpe,sharpe_pp,ann_return,max_dd,hit_rate,avg_turnover,error,created_at)"
-            " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "net_sharpe,sharpe_pp,ann_return,max_dd,hit_rate,avg_turnover,error,ret_sig,created_at)"
+            " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (row["genome_id"], row["market"], row["fidelity"], row["seed"], row["snapshot_id"],
              row["n_periods"], row["net_sharpe"], row.get("sharpe_pp"), row["ann_return"], row["max_dd"],
-             row["hit_rate"], row["avg_turnover"], row["error"], time.time()),
+             row["hit_rate"], row["avg_turnover"], row["error"], row.get("ret_sig", ""), time.time()),
         )
         self.conn.commit()
         return cur.lastrowid
+
+    def avg_trial_corr(self, market: Optional[str] = None, sample: int = 400) -> Optional[float]:
+        """Average pairwise correlation of trial P&L signatures — the equicorrelation ρ̄ used to
+        deflate the RAW trial count to an EFFECTIVE independent count. Genomes share features, so
+        their trials are correlated; treating N as fully independent over-deflates the Sharpe and
+        can manufacture a false 100% rejection (López de Prado, DSR Appendix 3)."""
+        q = "SELECT ret_sig FROM result_ledger WHERE ret_sig IS NOT NULL AND ret_sig!=''"
+        params: tuple = ()
+        if market:
+            q += " AND market=?"; params = (market,)
+        q += " ORDER BY eval_id DESC LIMIT ?"
+        rows = [r[0] for r in self.conn.execute(q, params + (int(sample),)).fetchall()]
+        import numpy as np
+        sigs = []
+        for s in rows:
+            try:
+                v = np.array([float(x) for x in s.split(",")], dtype=float)
+                if v.size >= 8 and np.isfinite(v).all():
+                    sigs.append(v)
+            except Exception:
+                continue
+        if len(sigs) < 8:
+            return None
+        k = min(v.size for v in sigs)
+        C = np.corrcoef(np.vstack([v[:k] for v in sigs]))
+        iu = np.triu_indices_from(C, k=1)
+        rho = float(np.nanmean(C[iu]))                    # signed: positive co-movement reduces independence
+        return None if not np.isfinite(rho) else float(min(max(rho, 0.0), 0.99))
+
+    def effective_trial_count(self, market: Optional[str] = None, rho: Optional[float] = None) -> int:
+        """Raw trial count deflated to effectively-independent trials via the equicorrelation
+        N_eff = N / (1 + (N−1)·ρ̄). Falls back to raw N when ρ̄ is unknown."""
+        n = self.trial_count(market)
+        if rho is None:
+            rho = self.avg_trial_corr(market)
+        if not rho or rho <= 0 or n <= 1:
+            return n
+        return max(1, int(round(n / (1.0 + (n - 1) * rho))))
 
     def sr_trial_std(self, market: Optional[str] = None) -> Optional[float]:
         """Std of per-observation Sharpes across trials — the σ_SR that scales the Deflated

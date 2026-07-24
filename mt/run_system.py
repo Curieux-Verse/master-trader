@@ -129,10 +129,13 @@ def run_system(markets, generations: int, batch_size: int, seed: int, structure:
     gr = store.conn.execute("SELECT passed, COUNT(*) FROM gauntlet_reports GROUP BY passed").fetchall()
     passed = sum(c for p, c in gr if p); rejected = sum(c for p, c in gr if not p)
     evaluated = store.trial_count()
+    rho = store.avg_trial_corr()
     discovery = {
         "generations": generations, "evaluated": evaluated, "admitted": passed, "rejected": rejected,
         "reject_rate": rejected / max(1, passed + rejected), "n_families": len(fam_all),
         "phenotypes": dict(pheno_all), "bandit": last_bandit.get(markets[0], {}),
+        "trial_corr": None if rho is None else round(rho, 4),
+        "effective_trials": store.effective_trial_count(None, rho),
         **_convergence(z_trend),
     }
 

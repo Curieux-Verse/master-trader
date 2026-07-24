@@ -96,6 +96,42 @@ def experiment_real_edge(seed: int = 2) -> dict:
             "pbo": report.gates.get("G3_cpcv_pbo", {}).get("pbo")}
 
 
+def experiment_effective_n(seed: int = 5, k: int = 30) -> dict:
+    """EFFECTIVE trial count: a family of near-duplicate genomes must collapse to ≈1 independent
+    trial, while a diverse set must stay near k — else the Deflated Sharpe over-deflates on the
+    correlated genomes it actually generates (López de Prado, DSR Appendix 3)."""
+    import os
+    import tempfile
+    from mt.store import MTStore
+    panel = make_panel(edge=True, n_sym=8, bars=600, seed=seed)
+    rng = np.random.default_rng(seed)
+    ops = ["momentum", "rsi", "breakout", "macd", "bb_position", "obv", "cci", "adx"]
+
+    def build(dupe: bool) -> tuple:
+        tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False); tmp.close()
+        store = MTStore(db_path=tmp.name)
+        for i in range(k):
+            if dupe:
+                g = momentum_genome(lookback=20 + int(rng.integers(-2, 3)), horizon=2)
+            else:
+                g = Genome(Meta(market="crypto", htf="4h"), [FeatureNode("f1", ops[i % len(ops)], {})],
+                           SignalSpec("weighted_blend", {"direction": ("long_bias", "short_bias", "neutral")[i % 3]}),
+                           SizingSpec("rank_bucket", {"top_frac": 0.2, "gross": 1.0, "per_name_cap": 0.15}),
+                           RiskSpec("horizon_hold", {"horizon": 2 + i % 6, "cost_stress": 1.0}))
+            store.record_eval(evaluate(g, panel, seed))
+        out = (store.trial_count("crypto"), store.avg_trial_corr("crypto"), store.effective_trial_count("crypto"))
+        store.close()
+        try:
+            os.unlink(tmp.name)
+        except OSError:
+            pass
+        return out
+
+    dup = build(True); div = build(False)
+    return {"dup_raw": dup[0], "dup_rho": dup[1], "dup_neff": dup[2],
+            "div_raw": div[0], "div_rho": div[1], "div_neff": div[2]}
+
+
 def run(verbose: bool = True) -> dict:
     try:                                        # Windows consoles default to cp1252; the report has ✓/✗
         import sys
@@ -104,8 +140,11 @@ def run(verbose: bool = True) -> dict:
         pass
     a = experiment_overfit_trap()
     b = experiment_real_edge()
+    c = experiment_effective_n()
     trap_ok = not a["passed"]                       # the overfit winner MUST be rejected
     edge_ok = bool(b["g4_significant"])             # the real edge MUST clear significance
+    # correlated trials collapse (N_eff ≪ raw) AND diverse trials do not
+    neff_ok = (c["dup_neff"] <= max(3, c["dup_raw"] // 3)) and (c["div_neff"] >= c["div_raw"] // 2)
     if verbose:
         print("=" * 72)
         print(" GAUNTLET SELF-TEST — the critical go/no-go (docs/09 P2)")
@@ -117,14 +156,18 @@ def run(verbose: bool = True) -> dict:
         print(f"    raw_sharpe={b['raw_sharpe']}, dsr_p={b['dsr_p']}, PBO={b['pbo']}, "
               f"full_pass={b['passed']}")
         print(f"    -> {'PASS ✓ (admitted the real edge at G4)' if edge_ok else 'FAIL ✗ (rejected a real edge)'}")
-        verdict = "TRUSTWORTHY" if (trap_ok and edge_ok) else "NOT TRUSTWORTHY — DO NOT PROCEED"
+        print(f"\n(C) Effective trial count: 30 near-duplicate genomes vs 30 diverse ones")
+        print(f"    duplicates: ρ̄={c['dup_rho']}  N_eff={c['dup_neff']}/{c['dup_raw']}   "
+              f"diverse: ρ̄={c['div_rho']}  N_eff={c['div_neff']}/{c['div_raw']}")
+        print(f"    -> {'PASS ✓ (correlated trials collapse, diverse ones do not)' if neff_ok else 'FAIL ✗'}")
+        verdict = "TRUSTWORTHY" if (trap_ok and edge_ok and neff_ok) else "NOT TRUSTWORTHY — DO NOT PROCEED"
         print("\n" + "=" * 72)
         print(f" RESULT: gauntlet is {verdict}")
         print("=" * 72)
-    return {"trap_ok": trap_ok, "edge_ok": edge_ok, "overfit": a, "edge": b}
+    return {"trap_ok": trap_ok, "edge_ok": edge_ok, "neff_ok": neff_ok, "overfit": a, "edge": b, "neff": c}
 
 
 if __name__ == "__main__":
     import sys
     r = run()
-    sys.exit(0 if (r["trap_ok"] and r["edge_ok"]) else 1)
+    sys.exit(0 if (r["trap_ok"] and r["edge_ok"] and r["neff_ok"]) else 1)

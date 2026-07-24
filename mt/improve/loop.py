@@ -64,6 +64,7 @@ class DiscoveryLoop:
                 produced.append((g, engine))
 
         sr_std = self.store.sr_trial_std(self.market)
+        rho = self.store.avg_trial_corr(self.market)         # P&L co-movement → effective trial count
         ctx = GauntletContext(eval_fn=lambda g, p: evaluate(g, p, self.seed), panel=self.panel,
                               holdout_panel=self.holdout, archive_returns=self.archive_returns,
                               seed=self.seed, sr_trial_std=sr_std)
@@ -84,8 +85,9 @@ class DiscoveryLoop:
             self.store.register_genome(g)
             res = evaluate(g, self.panel, self.seed)
             self.store.record_eval(res)
-            n_trials = self.store.trial_count(self.market)     # per-market N, paired with per-market σ_SR
-            report = self.gauntlet.run(g, res, trial_count=n_trials, ctx=ctx)
+            raw_n = self.store.trial_count(self.market)
+            n_eff = (max(1, int(round(raw_n / (1.0 + (raw_n - 1) * rho)))) if (rho and rho > 0) else raw_n)
+            report = self.gauntlet.run(g, res, trial_count=n_eff, ctx=ctx)   # EFFECTIVE independent trials
             self.store.record_gauntlet(g.genome_id, self.market, report.passed,
                                        report.failed_gate, report.gates, report.fitness)
 
@@ -136,6 +138,9 @@ class DiscoveryLoop:
             "archive_coverage": self.archive.coverage(),
             "lessons": self.store.lesson_count(),
             "sr_trial_std": None if sr_std is None else round(sr_std, 5),
+            "trial_corr": None if rho is None else round(rho, 4),
+            "raw_trials": self.store.trial_count(self.market),
+            "effective_trials": self.store.effective_trial_count(self.market, rho),
             "edge_t_median": None if not edge_t else round(float(np.median(edge_t)), 4),
             "edge_t_best": None if not edge_t else round(float(np.max(edge_t)), 4),
             "dsr_z_best": None if not dsr_z else round(float(np.max(dsr_z)), 4),

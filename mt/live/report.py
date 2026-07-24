@@ -18,7 +18,9 @@ def format_system_report(rep: Dict) -> str:
     L.append("═" * 60)
     disc = rep.get("discovery", {})
     L.append(f"\n▸ DISCOVERY  ({disc.get('generations', 0)} generations × {len(rep.get('markets', []))} markets)")
-    L.append(f"   genomes evaluated : {disc.get('evaluated', 0)}  (ledger trial count N)")
+    eff = disc.get("effective_trials"); rho = disc.get("trial_corr")
+    L.append(f"   genomes evaluated : {disc.get('evaluated', 0)}  (raw N)"
+             + (f"  →  N_eff={eff}  (ρ̄={rho}, effective independent trials)" if eff is not None else ""))
     L.append(f"   admitted to archive: {disc.get('admitted', 0)}   rejected: {disc.get('rejected', 0)} "
              f"({disc.get('reject_rate', 0):.0%})")
     L.append(f"   families tested    : {disc.get('n_families', 0)}   phenotypes: {disc.get('phenotypes', {})}")
@@ -114,7 +116,11 @@ def format_telegram_report(rep: Dict) -> str:
         L.append("")
 
     L.append("🔬 <b>Discovery</b>")
-    L.append(f"🧬 <b>{ev}</b> trials · <b>{disc.get('n_families', 0)}</b> families")
+    eff = disc.get("effective_trials")
+    trials_line = f"🧬 <b>{ev}</b> trials"
+    if eff is not None:
+        trials_line += f" → <b>{eff}</b> effective (ρ̄ {disc.get('trial_corr')})"
+    L.append(trials_line + f" · <b>{disc.get('n_families', 0)}</b> families")
     L.append(f"📈 {ph.get('cross_sectional', 0)} cross-sectional · 🎯 {ph.get('directional', 0)} directional")
     L.append(f"❌ {rej} rejected ({disc.get('reject_rate', 0):.0%})")
     if disc.get("convergence"):

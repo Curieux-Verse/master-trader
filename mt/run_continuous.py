@@ -107,6 +107,7 @@ def _f(x):
 def _digest(store, markets, z_trend, fam_all, pheno_all, gen, arch, admitted, t0, final=False, bandit=None):
     gr = store.conn.execute("SELECT passed, COUNT(*) FROM gauntlet_reports GROUP BY passed").fetchall()
     passed = sum(c for p, c in gr if p); rejected = sum(c for p, c in gr if not p)
+    rho = store.avg_trial_corr()
     rep = {
         "started": datetime.now(timezone.utc).isoformat(),
         "elapsed_s": round(time.time() - t0, 1), "markets": markets,
@@ -114,6 +115,8 @@ def _digest(store, markets, z_trend, fam_all, pheno_all, gen, arch, admitted, t0
                       "admitted": passed, "rejected": rejected,
                       "reject_rate": rejected / max(1, passed + rejected),
                       "n_families": len(fam_all), "phenotypes": dict(pheno_all),
+                      "trial_corr": None if rho is None else round(rho, 4),
+                      "effective_trials": store.effective_trial_count(None, rho),
                       "bandit": {k: round(v, 3) for k, v in (bandit or {}).items()},
                       **_convergence(z_trend)},
         "archive": {"coverage": arch, "elites": [{"niche": r["niche_key"], "fit": r["scalar_fit"],
