@@ -411,18 +411,21 @@ def tsmom_blend(panel, args, tf):
 
 
 def adx(panel, args, tf):
-    w = int(args.get("window", 14)); close, high, low, _, _ = _mats(panel, tf)
+    w = int(args.get("window", 14)); wilder = bool(args.get("wilder", False))
+    close, high, low, _, _ = _mats(panel, tf)
     up = high.diff(); dn = -low.diff()
     plus_dm = up.where((up > dn) & (up > 0), 0.0)
     minus_dm = dn.where((dn > up) & (dn > 0), 0.0)
     prev_close = close.shift(1)
     tr = np.maximum(np.maximum((high - low).abs(), (high - prev_close).abs()), (low - prev_close).abs())
-    mp = _mp(w)                                          # rolling mean ≈ Wilder, ~10× faster than ewm here
-    atr_ = tr.rolling(w, min_periods=mp).mean().replace(0, np.nan)
-    plus_di = 100 * plus_dm.rolling(w, min_periods=mp).mean() / atr_
-    minus_di = 100 * minus_dm.rolling(w, min_periods=mp).mean() / atr_
+    mp = _mp(w)
+    sm = ((lambda x: x.ewm(alpha=1.0 / w, min_periods=mp).mean()) if wilder   # true Wilder smoothing
+          else (lambda x: x.rolling(w, min_periods=mp).mean()))               # rolling ≈ Wilder, faster
+    atr_ = sm(tr).replace(0, np.nan)
+    plus_di = 100 * sm(plus_dm) / atr_
+    minus_di = 100 * sm(minus_dm) / atr_
     dx = 100 * (plus_di - minus_di).abs() / (plus_di + minus_di).replace(0, np.nan)
-    return (dx.rolling(w, min_periods=mp).mean() - 20.0) / 20.0
+    return (sm(dx) - 20.0) / 20.0
 
 
 # — oscillators —
@@ -756,6 +759,30 @@ def event_surprise(panel: NormPanel, args: dict, tf: str) -> pd.DataFrame:
     return cs.rolling(w, min_periods=1).mean()
 
 
+def cesi_surprise(panel: NormPanel, args: dict, tf: str) -> pd.DataFrame:
+    """CESI-style standardized economic-surprise index (Citigroup Economic Surprise Index, native
+    to FX/gold): the impact-weighted surprise normalized by its OWN trailing dispersion and
+    exponentially decayed — a surprise is 'big' relative to that series' history, not absolutely."""
+    w = int(args.get("window", 30))
+    cs = panel.field_matrix("cal_surprise", tf)
+    if cs.empty or not cs.notna().any().any():
+        return _close(panel, tf) * np.nan
+    sd = cs.rolling(w, min_periods=max(3, w // 3)).std().replace(0, np.nan)
+    return (cs / sd).ewm(span=w, min_periods=max(3, w // 3)).mean()
+
+
+def rel_strength(panel: NormPanel, args: dict, tf: str) -> pd.DataFrame:
+    """Relative strength vs the benchmark (Murphy, *Intermarket Analysis*): the symbol's trailing
+    return minus the benchmark's, in vol units. Positive = outperforming the cross-asset anchor."""
+    w = int(args.get("window", 60))
+    close = _close(panel, tf)
+    ref = panel.field_matrix("ref_close", tf).reindex_like(close)
+    if ref.empty or not ref.notna().any().any():
+        return close * np.nan
+    vol = close.pct_change().rolling(w, min_periods=_mp(w)).std().replace(0, np.nan)
+    return (close.pct_change(w) - ref.pct_change(w)) / vol
+
+
 BUILDERS: Dict[str, Callable[[NormPanel, dict, str], pd.DataFrame]] = {
     # classical
     "momentum": momentum, "reversion": reversion, "ema_dist": ema_dist, "rsi": rsi,
@@ -784,7 +811,7 @@ BUILDERS: Dict[str, Callable[[NormPanel, dict, str], pd.DataFrame]] = {
     # pattern
     "consolidation_score": consolidation_score,
     # cross-asset + SMC/ICT (lightweight computable proxies)
-    "rolling_corr": rolling_corr,
+    "rolling_corr": rolling_corr, "rel_strength": rel_strength, "cesi_surprise": cesi_surprise,
     "structure_break": structure_break, "fvg_gap": fvg_gap, "liquidity_sweep": liquidity_sweep,
     # tick footprint (real aggTrades)
     "stacked_imbalance": stacked_imbalance, "absorption": absorption,

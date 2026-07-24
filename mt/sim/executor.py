@@ -227,7 +227,11 @@ class Tier1Executor:
         lagged) → point-in-time; ≤0 trailing edge ⇒ 0 leverage (Kelly stands aside)."""
         frac = float(genome.sizing.args.get("kelly_frac", 0.5))       # fraction of full Kelly
         max_lev = float(genome.sizing.args.get("max_leverage", 3.0))
-        mu = net.expanding(min_periods=8).mean().shift(1)
+        # μ-shrinkage toward 0: full Kelly is fragile to estimation error in the MEAN (Thorp;
+        # O'Connell), and it's worst when the history is short — so shrink μ by n/(n+k₀).
+        n_obs = net.expanding(min_periods=8).count().shift(1)
+        shrink = (n_obs / (n_obs + 20.0))
+        mu = net.expanding(min_periods=8).mean().shift(1) * shrink
         var = net.expanding(min_periods=8).var(ddof=1).shift(1).replace(0, np.nan)
         k = (frac * mu / var).clip(lower=0.0, upper=max_lev).fillna(0.0)
         return net * k, k

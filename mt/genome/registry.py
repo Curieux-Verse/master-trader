@@ -243,8 +243,10 @@ register(OpSpec("tsmom_blend", "feature",
                 {"short": _win(20, 5, 60), "med": _win(60, 20, 160), "long": _win(120, 60, 300)},
                 output="Series[zscore]", cost_class="medium", tags=("trend", "momentum"), computable=True,
                 doc="multi-horizon vol-scaled time-series momentum blend (AQR; Moskowitz-Ooi-Pedersen)"))
-register(OpSpec("adx", "feature", {"window": ArgSpec("int", 5, 50, default=14)},
-                output="Series[zscore]", tags=("trend", "classical_ta"), computable=True))
+register(OpSpec("adx", "feature", {"window": ArgSpec("int", 5, 50, default=14),
+                                   "wilder": ArgSpec("bool", default=False)},
+                output="Series[zscore]", tags=("trend", "classical_ta"), computable=True,
+                doc="ADX trend strength; wilder=True uses true Wilder EWM smoothing"))
 # oscillators
 register(OpSpec("macd", "feature",
                 {"fast": ArgSpec("int", 5, 20, default=12), "slow": ArgSpec("int", 20, 60, default=26),
@@ -317,6 +319,14 @@ register(OpSpec("rolling_corr", "feature", {"window": _win(60, 20, 200)},
                 output="Series[zscore]", data_requires=("cross_asset",), cost_class="medium",
                 tags=("cross_asset", "intermarket"), computable=True,
                 doc="rolling correlation of returns with the market benchmark (BTC / gold)"))
+register(OpSpec("rel_strength", "feature", {"window": _win(60, 20, 240)},
+                output="Series[zscore]", data_requires=("cross_asset",), cost_class="cheap",
+                tags=("cross_asset", "intermarket"), computable=True,
+                doc="relative strength vs the benchmark, vol-scaled (Murphy intermarket)"))
+register(OpSpec("cesi_surprise", "feature", {"window": _win(30, 8, 90)},
+                output="Series[zscore]", data_requires=("calendar",), cost_class="cheap",
+                tags=("macro", "calendar", "event"), computable=True,
+                doc="CESI-style standardized economic-surprise index (decayed, self-normalized)"))
 # SMC / ICT — lightweight computable time-series proxies (full concepts/* remain snapshot-only)
 register(OpSpec("structure_break", "feature", {"window": _win(20, 8, 100)}, output="Series[categorical]",
                 cost_class="medium", tags=("smc", "ict"), computable=True,
