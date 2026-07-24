@@ -184,6 +184,17 @@ register(OpSpec("aggressor_ratio", "feature", {"window": _win(48, 5, 200)}, outp
 register(OpSpec("trade_intensity", "feature", {"window": _win(48, 5, 200)}, output="Series[zscore]",
                 data_requires=("taker_buy",), cost_class="medium", tags=("microstructure", "auction_market_theory"),
                 computable=True, doc="auction speed: z-score of real trades-per-bar"))
+# canonical microstructure measures on REAL order flow (docs/13 §2)
+register(OpSpec("vpin", "feature", {"window": _win(48, 10, 300)}, output="Series[return]",
+                data_requires=("taker_buy",), cost_class="medium",
+                tags=("microstructure", "order_flow", "auction_market_theory"), computable=True,
+                doc="VPIN order-flow toxicity Σ|buy−sell|/Σvol (Easley-López de Prado-O'Hara 2012)"))
+register(OpSpec("kyle_lambda", "feature", {"window": _win(48, 10, 300)}, output="Series[zscore]",
+                data_requires=("taker_buy",), cost_class="medium", tags=("microstructure", "order_flow", "liquidity"),
+                computable=True, doc="Kyle's λ price impact cov(ret,flow)/var(flow) (Kyle 1985)"))
+register(OpSpec("amihud_illiquidity", "feature", {"window": _win(48, 10, 300)}, output="Series[return]",
+                cost_class="cheap", tags=("microstructure", "liquidity"), computable=True,
+                doc="Amihud (2002) illiquidity: rolling mean |return|/dollar-volume"))
 
 # ── 3.15 Auction Market Theory & order flow (AMT proxies computable; footprint declared) ──
 register(OpSpec("dist_to_poc", "feature", {"window": _win(60, 20, 240)}, output="Series[zscore]",
@@ -269,7 +280,13 @@ register(OpSpec("consolidation_score", "feature", {"window": _win(20, 8, 100)}, 
 # ── other families: declared-only, to show the contract's breadth (docs/12 §2) ──
 register(OpSpec("hurst", "feature", {"window": _win(120, 40, 400)}, output="Series[zscore]",
                 cost_class="medium", tags=("statistical", "persistence"), computable=True,
-                doc="persistence proxy: 0.5 + 0.5·lag-1 autocorr of returns"))
+                doc="Hurst exponent (aggregated-variance method): H−0.5, >0 trending <0 reverting"))
+register(OpSpec("mean_reversion_halflife", "feature", {"window": _win(60, 20, 240)}, output="Series[zscore]",
+                cost_class="medium", tags=("statistical", "mean_reversion"), computable=True,
+                doc="Ornstein-Uhlenbeck MR alpha: deviation×reversion-speed from rolling AR(1) (Chan)"))
+register(OpSpec("coint_zscore", "feature", {"window": _win(90, 30, 300)}, output="Series[zscore]",
+                data_requires=("cross_asset",), cost_class="medium", tags=("statistical", "mean_reversion", "cross_asset"),
+                computable=True, doc="cointegration-residual z-score vs benchmark (Engle-Granger/Chan pairs)"))
 register(OpSpec("candlestick_pattern", "feature",
                 {"pattern": ArgSpec("choice", choices=("engulfing", "pin", "doji", "inside"), default="engulfing")},
                 output="Series[categorical]", tags=("pattern",), computable=True,

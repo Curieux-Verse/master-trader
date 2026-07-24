@@ -217,6 +217,48 @@ def trade_intensity(panel: NormPanel, args: dict, tf: str) -> pd.DataFrame:
     return (tc - mu) / sd
 
 
+def vpin(panel: NormPanel, args: dict, tf: str) -> pd.DataFrame:
+    """VPIN — order-flow *toxicity* (Easley, López de Prado & O'Hara 2012): rolling ABSOLUTE
+    imbalance Σ|buy−sell| / Σvolume ∈ [0,1]. Unsigned (distinct from order-flow imbalance) —
+    high VPIN flags informed/one-sided flow that precedes volatility. Real taker-buy; our exact
+    buy/sell beats the paper's bulk-volume classification. Inert where taker-buy is absent."""
+    w = int(args.get("window", 48))
+    delta, vol = _real_delta(panel, tf)                       # delta = buy − sell = 2·taker_buy − volume
+    if delta is None:
+        return _close(panel, tf) * np.nan
+    num = delta.abs().rolling(w, min_periods=_mp(w)).sum()
+    den = vol.rolling(w, min_periods=_mp(w)).sum().replace(0, np.nan)
+    return num / den
+
+
+def kyle_lambda(panel: NormPanel, args: dict, tf: str) -> pd.DataFrame:
+    """Kyle's λ (1985) — price impact per unit of (normalized) signed order flow, estimated as a
+    rolling cov(return, flow)/var(flow). Dimensionless (return per unit imbalance-fraction) so it
+    is comparable across symbols. High λ = illiquid / fragile. Real taker-buy flow."""
+    w = int(args.get("window", 48))
+    delta, vol = _real_delta(panel, tf)
+    if delta is None:
+        return _close(panel, tf) * np.nan
+    ret = _close(panel, tf).pct_change()
+    x = delta / vol.replace(0, np.nan)                        # normalized signed flow ∈ [−1,1]
+    mp = _mp(w)
+    mx = x.rolling(w, min_periods=mp).mean(); my = ret.rolling(w, min_periods=mp).mean()
+    cov = (x * ret).rolling(w, min_periods=mp).mean() - mx * my
+    var = x.rolling(w, min_periods=mp).var().replace(0, np.nan)
+    return cov / var
+
+
+def amihud_illiquidity(panel: NormPanel, args: dict, tf: str) -> pd.DataFrame:
+    """Amihud (2002) illiquidity: rolling mean of |return| / dollar-volume — how much price moves
+    per dollar traded. Higher = less liquid; a well-evidenced cross-sectional premium. OHLCV-only,
+    so it works on every market (not just crypto)."""
+    w = int(args.get("window", 48))
+    close, _, _, vol, _ = _mats(panel, tf)
+    ret = close.pct_change().abs()
+    dollar = (close * vol).replace(0, np.nan)
+    return (ret / dollar).rolling(w, min_periods=_mp(w)).mean()
+
+
 def delta_divergence(panel: NormPanel, args: dict, tf: str) -> pd.DataFrame:
     """Price up while delta down (or vice-versa) → absorption warning (proxy)."""
     w = int(args.get("window", 14))
@@ -383,9 +425,53 @@ def rolling_kurt(panel, args, tf):
 
 
 def hurst(panel, args, tf):
-    """Cheap persistence proxy in ~[0,1]: 0.5 + 0.5·lag-1 autocorrelation of returns."""
+    """Hurst exponent via the aggregated-variance method: Var(k-period return) ∝ k^(2H), so the
+    slope of log Var(k) on log k across scales is 2H. Returns H−0.5 (>0 persistent/trending, <0
+    anti-persistent/mean-reverting, 0 random walk) — a faithful replacement for the old
+    0.5+0.5·autocorr proxy (Chan, Algorithmic Trading)."""
     w = int(args.get("window", 120))
-    return 0.5 + 0.5 * autocorr(panel, {"lag": 1, "window": w}, tf)
+    close = _close(panel, tf); mp = _mp(w)
+    lags = (1, 2, 4, 8, 16)
+    logk = np.log(np.array(lags, dtype=float)); xbar = logk.mean()
+    sxx = float(((logk - xbar) ** 2).sum())
+    logvar = [np.log(close.pct_change(k).rolling(w, min_periods=mp).var().replace(0, np.nan)) for k in lags]
+    slope = sum((logk[i] - xbar) * logvar[i] for i in range(len(lags))) / sxx   # = 2H
+    return 0.5 * slope - 0.5
+
+
+def mean_reversion_halflife(panel, args, tf):
+    """Ornstein-Uhlenbeck mean-reversion signal (Chan): fit a rolling AR(1) on log price
+    (Δy = λ·y₋₁+…), λ<0 ⇒ mean-reverting with half-life −ln2/λ. Returns the deviation-from-
+    equilibrium (in σ) *scaled by the reversion speed* → a real MR alpha that is strong only
+    where the series actually reverts, and inert where it trends."""
+    w = int(args.get("window", 60))
+    close = _close(panel, tf); mp = _mp(w)
+    y = np.log(close.replace(0, np.nan)); dy = y.diff(); ylag = y.shift(1)
+    mx = ylag.rolling(w, min_periods=mp).mean(); md = dy.rolling(w, min_periods=mp).mean()
+    cov = (ylag * dy).rolling(w, min_periods=mp).mean() - mx * md
+    var = ylag.rolling(w, min_periods=mp).var().replace(0, np.nan)
+    lam = cov / var                                          # AR(1) drift coefficient
+    speed = (-lam).clip(lower=0.0)                           # reversion speed (0 if trending)
+    dev = (y - y.rolling(w, min_periods=mp).mean()) / y.rolling(w, min_periods=mp).std().replace(0, np.nan)
+    return -(dev) * speed                                    # short rich / long cheap, weighted by speed
+
+
+def coint_zscore(panel, args, tf):
+    """Cointegration-residual z-score vs the benchmark (Engle-Granger / Chan pairs): rolling hedge
+    ratio β = cov(y,x)/var(x) on log prices, spread = y − β·x, z-scored. A genuine stat-arb signal
+    (revert to the cointegrating relationship) rather than plain correlation."""
+    w = int(args.get("window", 90))
+    close = _close(panel, tf); mp = _mp(w)
+    ref = panel.field_matrix("ref_close", tf).reindex_like(close)
+    if ref.empty or not ref.notna().any().any():
+        return close * np.nan
+    y = np.log(close.replace(0, np.nan)); x = np.log(ref.replace(0, np.nan))
+    mx = x.rolling(w, min_periods=mp).mean(); my = y.rolling(w, min_periods=mp).mean()
+    cov = (x * y).rolling(w, min_periods=mp).mean() - mx * my
+    beta = cov / x.rolling(w, min_periods=mp).var().replace(0, np.nan)
+    resid = y - beta * x
+    z = (resid - resid.rolling(w, min_periods=mp).mean()) / resid.rolling(w, min_periods=mp).std().replace(0, np.nan)
+    return -z                                                # revert to the cointegration
 
 
 def price_zscore(panel, args, tf):
@@ -542,6 +628,8 @@ BUILDERS: Dict[str, Callable[[NormPanel, dict, str], pd.DataFrame]] = {
     "cumulative_delta": cumulative_delta, "delta_divergence": delta_divergence, "rotation_factor": rotation_factor,
     "order_flow_imbalance": order_flow_imbalance, "aggressor_ratio": aggressor_ratio,
     "trade_intensity": trade_intensity,
+    # microstructure (real order flow): Kyle's λ, VPIN toxicity, Amihud illiquidity
+    "vpin": vpin, "kyle_lambda": kyle_lambda, "amihud_illiquidity": amihud_illiquidity,
     # trend
     "sma_dist": sma_dist, "ma_cross": ma_cross, "slope": slope, "adx": adx,
     # oscillators
@@ -553,6 +641,7 @@ BUILDERS: Dict[str, Callable[[NormPanel, dict, str], pd.DataFrame]] = {
     # statistical
     "autocorr": autocorr, "variance_ratio": variance_ratio, "rolling_skew": rolling_skew,
     "rolling_kurt": rolling_kurt, "hurst": hurst, "price_zscore": price_zscore,
+    "mean_reversion_halflife": mean_reversion_halflife, "coint_zscore": coint_zscore,
     # pattern
     "consolidation_score": consolidation_score,
     # cross-asset + SMC/ICT (lightweight computable proxies)
