@@ -134,6 +134,12 @@ def dump(db_path=None, out_path=None, top_n=20, full=False) -> str:
     n_trials = conn.execute("SELECT COUNT(*) FROM result_ledger").fetchone()[0]
     scr = conn.execute("SELECT COALESCE(SUM(n),0) FROM screening_ledger").fetchone()[0] or 0
     arch = conn.execute("SELECT niche_key, market, scalar_fit FROM archive ORDER BY scalar_fit DESC").fetchall()
+    from mt.store.db import MTStore
+    store = MTStore(db_path=db_path or DB_PATH)
+    rho = store.avg_trial_corr()
+    n_eff = store.effective_trial_count(None, rho)
+    attributions = store.top_feature_attributions(None, limit=15)
+    store.close()
     conn.close()
 
     top.sort(key=lambda t: -t[0])
@@ -153,7 +159,9 @@ def dump(db_path=None, out_path=None, top_n=20, full=False) -> str:
     L.append("| | |")
     L.append("|---|---|")
     L.append(f"| Genomes generated & tested | **{total:,}** |")
-    L.append(f"| Deflated-Sharpe trial count (N) | **{n_trials + scr:,}** *(evals {n_trials:,} + {scr:,} screened)* |")
+    L.append(f"| Deflated-Sharpe trial count (raw N) | **{n_trials + scr:,}** *(evals {n_trials:,} + {scr:,} screened)* |")
+    if n_eff is not None:
+        L.append(f"| **Effective** independent trials (N_eff) | **{n_eff:,}** *(ρ̄={rho} — the bar the DSR actually uses)* |")
     L.append(f"| Admitted to archive | **{admitted}** |")
     L.append(f"| Rejected | **{total - admitted:,}** ({(total-admitted)/max(1,total):.1%}) |")
     L.append(f"| Distinct families explored | **{len(by_family)}** |")
@@ -239,6 +247,23 @@ def dump(db_path=None, out_path=None, top_n=20, full=False) -> str:
     L.append("### 4.5 By position sizing"); L += _table("Sizing", by_sizing, label="sizing op")
     L.append(f"### 4.6 By strategy family — all {len(by_family)} explored")
     L += _table("Family (ranked by best DSR-z)", by_family, label="family")
+    L.append("---")
+
+    # 4.7 — measured feature attribution
+    if attributions:
+        L.append("")
+        L.append("### 4.7 Feature attribution — which primitives *measurably* carry signal")
+        L.append("")
+        L.append("*Leave-one-out ΔDSR-z on near-miss genomes: how much **dropping** each feature lowered the "
+                 "Deflated-Sharpe z. Positive ⇒ the feature carried edge; ≤0 ⇒ it was inert or noise. This is "
+                 "measured contribution, not the family it's tagged under.*")
+        L.append("")
+        L.append("| feature | times measured | mean ΔDSR-z | verdict |")
+        L.append("|---|---:|---:|---|")
+        for op, nm, dz in attributions:
+            verdict = "**carries signal**" if dz > 0.05 else ("inert / noise" if dz <= 0 else "marginal")
+            L.append(f"| `{op}` | {nm} | {dz:+.3f} | {verdict} |")
+        L.append("")
     L.append("---")
 
     # 5 — archive + lessons

@@ -109,6 +109,8 @@ class DiscoveryLoop:
             z = (report.gates.get("G4_deflated_sharpe", {}) or {}).get("dsr_z")
             if z is not None and np.isfinite(z):
                 dsr_z.append(float(z))
+                if z > 0.5 and len(g.features) > 1:          # near-miss → measure which feature carried it
+                    self._attribute(g, float(z), n_eff, sr_std)
             spp = res.summary.get("sharpe_pp"); npd = res.summary.get("n_periods", 0)
             if spp is not None and np.isfinite(spp) and npd > 1:
                 edge_t.append(float(spp) * np.sqrt(npd))     # SR·√T — significance free of the N penalty
@@ -174,6 +176,28 @@ class DiscoveryLoop:
                 out.append(self.sampler._random(self.market))
             return out
         return [self.sampler._random(self.market) for _ in range(cnt)]
+
+    def _attribute(self, g: Genome, base_z: float, n_eff: int, sr_std) -> None:
+        """Leave-one-feature-out ΔDSR-z: re-evaluate the genome with each feature dropped and
+        record how much the Deflated-Sharpe z falls — the empirical contribution of each primitive
+        (so we learn e.g. whether order_block_strength adds anything beyond the trend it rides)."""
+        import copy
+        from mt.adapters.cclib import deflated_sharpe
+        for i in range(len(g.features)):
+            gg = copy.deepcopy(g)
+            del gg.features[i]
+            if not gg.typecheck()[0]:
+                continue
+            try:
+                res2 = evaluate(gg, self.panel, self.seed)
+                if not res2.ok:
+                    continue
+                d = deflated_sharpe(res2.net_returns.tolist(), n_trials=max(1, n_eff), sr_trial_std=sr_std)
+                z2 = d.get("dsr_z_score")
+                if z2 is not None:
+                    self.store.record_attribution(self.market, g.features[i].op, base_z - float(z2))
+            except Exception:
+                continue
 
     def _mine(self, cnt: int) -> List[Genome]:
         if self.rng.random() < 0.4:                      # occasionally grow the vocabulary

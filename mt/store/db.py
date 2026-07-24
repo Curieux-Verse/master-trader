@@ -80,6 +80,13 @@ CREATE TABLE IF NOT EXISTS screening_ledger (
     kind        TEXT,
     created_at  REAL
 );
+CREATE TABLE IF NOT EXISTS attributions (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    market      TEXT,
+    feature_op  TEXT,
+    delta_z     REAL,
+    created_at  REAL
+);
 """
 
 
@@ -204,6 +211,25 @@ class MTStore:
         import statistics
         s = statistics.pstdev(vals)
         return float(s) if s > 0 else None
+
+    def record_attribution(self, market: str, feature_op: str, delta_z: float) -> None:
+        """Store one leave-one-out ΔDSR-z: how much DROPPING this feature hurt a near-miss genome's
+        Deflated Sharpe (positive ⇒ the feature carried signal). Turns 26 families of guesswork into
+        measured per-primitive contribution (docs/13 attribution)."""
+        import math
+        if delta_z is None or not math.isfinite(delta_z):
+            return
+        self.conn.execute("INSERT INTO attributions(market,feature_op,delta_z,created_at) VALUES(?,?,?,?)",
+                          (market, feature_op, float(delta_z), time.time()))
+        self.conn.commit()
+
+    def top_feature_attributions(self, market: Optional[str] = None, limit: int = 20) -> List[tuple]:
+        """(feature_op, n, mean ΔDSR-z) ranked by mean contribution — which primitives carry signal."""
+        q = ("SELECT feature_op, COUNT(*), AVG(delta_z) FROM attributions "
+             + ("WHERE market=? " if market else "") + "GROUP BY feature_op "
+             "HAVING COUNT(*) >= 2 ORDER BY AVG(delta_z) DESC LIMIT ?")
+        params = ((market, limit) if market else (limit,))
+        return [(r[0], int(r[1]), float(r[2])) for r in self.conn.execute(q, params).fetchall()]
 
     def record_screening(self, market: str, n: int, kind: str = "miner_ic") -> None:
         """Charge N *hidden* selection trials (e.g. IC-screened miner candidates that were
