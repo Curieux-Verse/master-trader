@@ -1,0 +1,68 @@
+name: genome-report
+
+# Regenerates the categorized Genome Population Report from the accumulated brain
+# (var/mt.db in the Actions cache) without running a whole marathon, and commits it to runs/.
+on:
+  workflow_dispatch:
+    inputs:
+      top:
+        description: "headline candidates shown in full"
+        default: "25"
+      full:
+        description: "append a one-line index of EVERY genome (true/false)"
+        default: "false"
+
+permissions:
+  contents: write
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Restore accumulated brain (db)
+        uses: actions/cache/restore@v4
+        with:
+          path: var/mt.db
+          key: mtdb-report-probe # never matches; forces the prefix restore below
+          restore-keys: mtdb-
+      - name: Require a brain
+        run: |
+          if [ ! -f var/mt.db ]; then
+            echo "::error::No accumulated brain in the cache — run the 'marathon' workflow first."
+            exit 1
+          fi
+          echo "brain size: $(du -h var/mt.db | cut -f1)"
+
+      - name: Generate the report
+        env:
+          TOP: ${{ github.event.inputs.top || '25' }}
+          FULL: ${{ github.event.inputs.full || 'false' }}
+          PYTHONIOENCODING: utf-8
+        run: |
+          if [ "$FULL" = "true" ]; then
+            python -m mt.run_genomes --top "$TOP" --full
+          else
+            python -m mt.run_genomes --top "$TOP"
+          fi
+
+      - name: Commit the report
+        run: |
+          mkdir -p runs
+          cp var/runs/genomes_current.md runs/genomes_current.md
+          git config user.name "master-trader-bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add runs/genomes_current.md
+          git commit -m "docs(genomes): regenerate population report $(date -u +%FT%TZ) [skip ci]" \
+            || echo "nothing to commit"
+          git push || echo "push skipped"
