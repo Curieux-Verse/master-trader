@@ -134,6 +134,93 @@ def _clv_delta(panel: NormPanel, tf: str) -> pd.DataFrame:
     return clv * vol
 
 
+# ─── real Market Profile: developing POC + Value Area (Steidlmayer/Dalton) ─
+def _volume_profile_core(close, volume, w, levels):
+    """Rolling volume-at-price profile → (POC price, value-area low, value-area high) per bar.
+    POC = price level with the most volume over the trailing window; Value Area = the contiguous
+    price band holding 70% of volume around the POC. Pure-numeric so Numba JITs it."""
+    n = len(close)
+    poc = np.full(n, np.nan); va_lo = np.full(n, np.nan); va_hi = np.full(n, np.nan)
+    for t in range(w - 1, n):
+        lo = close[t - w + 1]; hi = lo
+        for j in range(t - w + 1, t + 1):
+            cj = close[j]
+            if cj < lo:
+                lo = cj
+            if cj > hi:
+                hi = cj
+        if not (hi > lo):
+            continue
+        binw = (hi - lo) / levels
+        vp = np.zeros(levels)
+        for j in range(t - w + 1, t + 1):
+            b = int((close[j] - lo) / binw)
+            if b >= levels:
+                b = levels - 1
+            elif b < 0:
+                b = 0
+            vp[b] += volume[j]
+        pk = 0
+        for b in range(1, levels):
+            if vp[b] > vp[pk]:
+                pk = b
+        poc[t] = lo + (pk + 0.5) * binw
+        total = 0.0
+        for b in range(levels):
+            total += vp[b]
+        target = 0.7 * total
+        acc = vp[pk]; lob = pk; hib = pk
+        while acc < target and (lob > 0 or hib < levels - 1):
+            up = vp[hib + 1] if hib < levels - 1 else -1.0
+            dn = vp[lob - 1] if lob > 0 else -1.0
+            if up >= dn and hib < levels - 1:
+                hib += 1; acc += vp[hib]
+            elif lob > 0:
+                lob -= 1; acc += vp[lob]
+            else:
+                break
+        va_lo[t] = lo + lob * binw; va_hi[t] = lo + (hib + 1) * binw
+    return poc, va_lo, va_hi
+
+
+try:                                                          # JIT when available; identical fallback
+    from numba import njit as _njit
+    _profile_core = _njit(cache=True)(_volume_profile_core)
+except Exception:                                             # pragma: no cover
+    _profile_core = _volume_profile_core
+
+
+def _profile(panel: NormPanel, tf: str, w: int, levels: int = 24):
+    close, _, _, vol, _ = _mats(panel, tf)
+    poc, vlo, vhi = {}, {}, {}
+    for sym in close.columns:
+        c = np.ascontiguousarray(close[sym].to_numpy(), dtype=np.float64)
+        v = np.ascontiguousarray(vol[sym].to_numpy(), dtype=np.float64)
+        v = np.where(np.isfinite(v), v, 0.0)
+        p, lo, hi = _profile_core(c, v, int(w), int(levels))
+        poc[sym] = p; vlo[sym] = lo; vhi[sym] = hi
+    idx = close.index
+    return (pd.DataFrame(poc, index=idx), pd.DataFrame(vlo, index=idx), pd.DataFrame(vhi, index=idx))
+
+
+def poc_distance_real(panel: NormPanel, args: dict, tf: str) -> pd.DataFrame:
+    """Distance from price to the REAL developing Point of Control (volume mode), in ATR — the
+    genuine Market Profile POC (Steidlmayer/Dalton), not the VWAP-mean proxy."""
+    w = int(args.get("window", 60)); levels = int(args.get("levels", 24))
+    close, _, _, _, atr = _mats(panel, tf)
+    poc, _, _ = _profile(panel, tf, w, levels)
+    return (close - poc) / atr
+
+
+def value_area_real(panel: NormPanel, args: dict, tf: str) -> pd.DataFrame:
+    """+1 above / 0 inside / −1 below the REAL developing Value Area (the contiguous 70%-volume
+    band around the POC) — the actual Market Profile construction."""
+    w = int(args.get("window", 60)); levels = int(args.get("levels", 24))
+    close = _close(panel, tf)
+    _, vlo, vhi = _profile(panel, tf, w, levels)
+    return (close > vhi).astype(float) - (close < vlo).astype(float)
+
+
 def dist_to_poc(panel: NormPanel, args: dict, tf: str) -> pd.DataFrame:
     """Distance of price to the developing volume Point of Control, in ATR (proxy: VWAP)."""
     w = int(args.get("window", 60))
@@ -310,6 +397,19 @@ def slope(panel, args, tf):
     return close.diff().rolling(w, min_periods=_mp(w)).mean() / atr
 
 
+def tsmom_blend(panel, args, tf):
+    """Multi-horizon time-series momentum (AQR 'Trends Everywhere'; Moskowitz-Ooi-Pedersen 2012):
+    the average of vol-scaled momentum at short / medium / long lookbacks — one feature capturing
+    the horizon blend a real trend desk runs, instead of the search rediscovering it."""
+    close = _close(panel, tf); r = close.pct_change()
+    acc = None; n = 0
+    for lb in (int(args.get("short", 20)), int(args.get("med", 60)), int(args.get("long", 120))):
+        vol = r.rolling(lb, min_periods=max(3, lb // 3)).std().replace(0, np.nan)
+        comp = (close / close.shift(lb) - 1.0) / vol
+        acc = comp if acc is None else acc + comp; n += 1
+    return acc / max(1, n)
+
+
 def adx(panel, args, tf):
     w = int(args.get("window", 14)); close, high, low, _, _ = _mats(panel, tf)
     up = high.diff(); dn = -low.diff()
@@ -374,6 +474,30 @@ def vol_of_vol(panel, args, tf):
     w = int(args.get("window", 48)); close = _close(panel, tf)
     rv = close.pct_change().rolling(w, min_periods=_mp(w)).std()
     return -rv.rolling(w, min_periods=_mp(w)).std()
+
+
+def har_vol(panel, args, tf):
+    """HAR-RV vol term-structure (Corsi 2009): short-horizon realized vol relative to long-horizon
+    realized vol. >0 ⇒ vol expanding vs its longer-run level — a principled atr_expansion."""
+    short = int(args.get("short", 6)); long_ = int(args.get("long", 132))
+    r = _close(panel, tf).pct_change()
+    rv_s = r.rolling(short, min_periods=max(2, short // 2)).std()
+    rv_l = r.rolling(long_, min_periods=max(5, long_ // 3)).std().replace(0, np.nan)
+    return rv_s / rv_l - 1.0
+
+
+def range_vol(panel, args, tf):
+    """Yang-Zhang (2000) OHLC range volatility — the most efficient close-to-close alternative,
+    combining overnight, open-close and Rogers-Satchell terms. Same window, far less noise, using
+    OHLC we already store. Negated (low-vol tilt, like realized_vol)."""
+    w = int(args.get("window", 48)); close, high, low, _, _ = _mats(panel, tf)
+    open_ = panel.field_matrix("open", tf).reindex_like(close); mp = _mp(w)
+    o = np.log(open_ / close.shift(1)); c = np.log(close / open_)
+    rs = np.log(high / close) * np.log(high / open_) + np.log(low / close) * np.log(low / open_)
+    k = 0.34 / (1.34 + (w + 1) / (w - 1))
+    yz = (o.rolling(w, min_periods=mp).var() + k * c.rolling(w, min_periods=mp).var()
+          + (1 - k) * rs.rolling(w, min_periods=mp).mean())
+    return -np.sqrt(yz.clip(lower=0))
 
 
 # — volume —
@@ -600,6 +724,19 @@ def cot_zscore(panel: NormPanel, args: dict, tf: str) -> pd.DataFrame:
     return cz.rolling(w, min_periods=1).mean()
 
 
+def cot_index(panel: NormPanel, args: dict, tf: str) -> pd.DataFrame:
+    """Williams COT Index: the %-range (stochastic) of net positioning over a lookback, in [-1,1].
+    Extremes are contrarian (Larry Williams, *Secrets of the COT Report*). Built from cot_z."""
+    w = int(args.get("window", 26))
+    cz = panel.field_matrix("cot_z", tf)
+    if cz.empty or not cz.notna().any().any():
+        return _close(panel, tf) * np.nan
+    mp = max(3, w // 3)
+    lo = cz.rolling(w, min_periods=mp).min(); hi = cz.rolling(w, min_periods=mp).max()
+    idx = (cz - lo) / (hi - lo).replace(0, np.nan)            # 0..1 within the lookback range
+    return 2.0 * idx - 1.0                                    # −1 (min positioning) .. +1 (max)
+
+
 def news_sentiment(panel: NormPanel, args: dict, tf: str) -> pd.DataFrame:
     """News tone (GDELT) rolling average, from the enriched news_tone column."""
     w = int(args.get("window", 24))
@@ -625,17 +762,19 @@ BUILDERS: Dict[str, Callable[[NormPanel, dict, str], pd.DataFrame]] = {
     "realized_vol": realized_vol, "breakout": breakout, "atr_pct": atr_pct, "funding_z": funding_z,
     # AMT / order-flow proxies + REAL bar-level order flow (Binance taker-buy)
     "dist_to_poc": dist_to_poc, "value_area_position": value_area_position,
+    "poc_distance_real": poc_distance_real, "value_area_real": value_area_real,
     "cumulative_delta": cumulative_delta, "delta_divergence": delta_divergence, "rotation_factor": rotation_factor,
     "order_flow_imbalance": order_flow_imbalance, "aggressor_ratio": aggressor_ratio,
     "trade_intensity": trade_intensity,
     # microstructure (real order flow): Kyle's λ, VPIN toxicity, Amihud illiquidity
     "vpin": vpin, "kyle_lambda": kyle_lambda, "amihud_illiquidity": amihud_illiquidity,
     # trend
-    "sma_dist": sma_dist, "ma_cross": ma_cross, "slope": slope, "adx": adx,
+    "sma_dist": sma_dist, "ma_cross": ma_cross, "slope": slope, "adx": adx, "tsmom_blend": tsmom_blend,
     # oscillators
     "macd": macd, "stoch": stoch, "cci": cci, "williams_r": williams_r, "roc": roc,
     # volatility
     "bb_position": bb_position, "atr_expansion": atr_expansion, "vol_of_vol": vol_of_vol,
+    "har_vol": har_vol, "range_vol": range_vol,
     # volume
     "obv": obv, "vwap_distance": vwap_distance, "rel_volume": rel_volume, "volume_zscore": volume_zscore,
     # statistical
@@ -651,8 +790,8 @@ BUILDERS: Dict[str, Callable[[NormPanel, dict, str], pd.DataFrame]] = {
     "stacked_imbalance": stacked_imbalance, "absorption": absorption,
     # the last five: pattern / SMC OB / vol-regime / COT / news
     "candlestick_pattern": candlestick_pattern, "order_block_strength": order_block_strength,
-    "vol_regime_tag": vol_regime_tag, "cot_zscore": cot_zscore, "news_sentiment": news_sentiment,
-    "event_surprise": event_surprise,
+    "vol_regime_tag": vol_regime_tag, "cot_zscore": cot_zscore, "cot_index": cot_index,
+    "news_sentiment": news_sentiment, "event_surprise": event_surprise,
 }
 
 

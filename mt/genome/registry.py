@@ -203,6 +203,15 @@ register(OpSpec("dist_to_poc", "feature", {"window": _win(60, 20, 240)}, output=
 register(OpSpec("value_area_position", "feature", {"window": _win(60, 20, 240)}, output="Series[categorical]",
                 cost_class="medium", tags=("auction_market_theory", "market_profile"), computable=True,
                 doc="above / inside / below the developing value area (proxy)"))
+# REAL Market Profile: developing POC + Value Area from a volume-at-price histogram (Steidlmayer/Dalton)
+register(OpSpec("poc_distance_real", "feature",
+                {"window": _win(60, 20, 240), "levels": ArgSpec("int", 10, 40, default=24)},
+                output="Series[zscore]", cost_class="heavy", tags=("auction_market_theory", "volume_profile"),
+                computable=True, doc="distance to the REAL developing volume POC in ATR (histogram mode)"))
+register(OpSpec("value_area_real", "feature",
+                {"window": _win(60, 20, 240), "levels": ArgSpec("int", 10, 40, default=24)},
+                output="Series[categorical]", cost_class="heavy", tags=("auction_market_theory", "market_profile"),
+                computable=True, doc="above / inside / below the REAL developing 70% Value Area"))
 register(OpSpec("cumulative_delta", "feature", {"window": _win(48, 10, 200)}, output="Series[zscore]",
                 cost_class="medium", tags=("auction_market_theory", "order_flow"), computable=True,
                 doc="cumulative volume delta via close-location proxy (extends cvd)"))
@@ -230,6 +239,10 @@ register(OpSpec("ma_cross", "feature",
                 output="Series[zscore]", tags=("trend",), computable=True))
 register(OpSpec("slope", "feature", {"window": _win(20, 5, 120)}, output="Series[zscore]",
                 tags=("trend",), computable=True))
+register(OpSpec("tsmom_blend", "feature",
+                {"short": _win(20, 5, 60), "med": _win(60, 20, 160), "long": _win(120, 60, 300)},
+                output="Series[zscore]", cost_class="medium", tags=("trend", "momentum"), computable=True,
+                doc="multi-horizon vol-scaled time-series momentum blend (AQR; Moskowitz-Ooi-Pedersen)"))
 register(OpSpec("adx", "feature", {"window": ArgSpec("int", 5, 50, default=14)},
                 output="Series[zscore]", tags=("trend", "classical_ta"), computable=True))
 # oscillators
@@ -252,6 +265,12 @@ register(OpSpec("atr_expansion", "feature", {"window": _win(48, 10, 200)}, outpu
                 tags=("volatility",), computable=True))
 register(OpSpec("vol_of_vol", "feature", {"window": _win(48, 10, 200)}, output="Series[return]",
                 tags=("volatility",), computable=True))
+register(OpSpec("har_vol", "feature", {"short": _win(6, 3, 24), "long": _win(132, 40, 400)},
+                output="Series[return]", cost_class="medium", tags=("volatility",), computable=True,
+                doc="HAR-RV vol term-structure: short-horizon RV vs long-horizon RV (Corsi 2009)"))
+register(OpSpec("range_vol", "feature", {"window": _win(48, 10, 200)}, output="Series[return]",
+                cost_class="medium", tags=("volatility",), computable=True,
+                doc="Yang-Zhang OHLC range volatility (2000) — efficient close-to-close alternative"))
 # volume
 register(OpSpec("obv", "feature", {"window": _win(48, 10, 200)}, output="Series[zscore]",
                 tags=("volume",), computable=True))
@@ -311,6 +330,10 @@ register(OpSpec("cot_zscore", "feature", {"window": _win(26, 4, 104)},
                 output="Series[zscore]", data_requires=("cot",), cost_class="cheap",
                 tags=("macro", "positioning"), computable=True,
                 doc="CFTC COT net-positioning z-score (from enriched cot_z column)"))
+register(OpSpec("cot_index", "feature", {"window": _win(26, 6, 104)},
+                output="Series[zscore]", data_requires=("cot",), cost_class="cheap",
+                tags=("macro", "positioning"), computable=True,
+                doc="Williams COT Index: %-range of net positioning over a lookback (contrarian extremes)"))
 register(OpSpec("news_sentiment", "feature", {"window": _win(24, 4, 168)}, output="Series[zscore]",
                 data_requires=("news",), cost_class="medium", tags=("sentiment", "macro"), computable=True,
                 doc="GDELT news tone (from enriched news_tone column)"))
