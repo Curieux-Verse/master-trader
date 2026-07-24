@@ -37,6 +37,8 @@ def main():
                     help="enrich mapped symbols with CFTC COT positioning + GDELT news tone (deep)")
     ap.add_argument("--calendar", action="store_true",
                     help="enrich with FairEconomy event surprise (ForexFactory/MetalsMine/CryptoCraft)")
+    ap.add_argument("--fedwatch", action="store_true",
+                    help="enrich with CME-FedWatch-style Fed policy expectation (FRED 1Y yield − target)")
     args = ap.parse_args()
     markets = [m.strip() for m in args.markets.split(",") if m.strip()]
 
@@ -81,6 +83,17 @@ def main():
             print(f"\n[{m}] enriching with FairEconomy event surprise…")
             n = enrich_calendar(m, snapshot_id=args.snapshot_id)
             print(f"   → calendar attached to {n} symbol frames")
+
+    if args.fedwatch:
+        from mt.ingest.lake import enrich_fedwatch
+        from mt.ingest.fedwatch import available as fred_available
+        if not fred_available():
+            print("\n  ⚠ FRED_API_KEY not found — FedWatch enrichment skipped.")
+        else:
+            for m in markets:
+                print(f"\n[{m}] enriching with CME-FedWatch-style Fed policy expectation (FRED)…")
+                n = enrich_fedwatch(m, snapshot_id=args.snapshot_id)
+                print(f"   → fed_expectation attached to {n} symbol frames")
 
     print("\n" + "=" * 70)
     print(" LAKE READY")

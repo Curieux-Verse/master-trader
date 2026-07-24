@@ -16,6 +16,7 @@
 | Profile: real `poc_distance_real`, `value_area_real` (numba) (§2) | ✅ shipped |
 | Positioning: `cot_index` (Williams), `rel_strength` (Murphy) (§6) | ✅ shipped |
 | Event: `cesi_surprise` (§7) · Sizing: Kelly μ-shrinkage (§8) · `adx` Wilder option | ✅ shipped |
+| Rates: `fed_policy_bias`, `fed_repricing` — CME-FedWatch-style Fed policy expectation (FRED 1Y yield − FOMC target, PIT-lagged) | ✅ shipped — `mt.ingest.fedwatch` + `enrich_fedwatch`; `--fedwatch` ingest flag. CME exposes no free FedWatch/ZQ API, so the same signal is rebuilt from FRED |
 | **Feature attribution** (leave-one-out ΔDSR-z) | ✅ shipped — `attributions` table + report §4.7 |
 | **HMM regime** (§5) | ⏸️ **deferred** — smoothed HMM posteriors use the backward pass (future data) → lookahead, and per-eval EM would slow the marathon. Shipping it would violate the anti-overfit contract. Revisit only with walk-forward *filtered* posteriors. |
 | Lo-MacKinlay VR bias correction (§3) | ⏭️ skipped — the downstream cross-sectional z-score neutralizes the level bias it fixes. |

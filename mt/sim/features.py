@@ -759,6 +759,33 @@ def event_surprise(panel: NormPanel, args: dict, tf: str) -> pd.DataFrame:
     return cs.rolling(w, min_periods=1).mean()
 
 
+def fed_policy_bias(panel: NormPanel, args: dict, tf: str) -> pd.DataFrame:
+    """CME-FedWatch-style Fed policy stance: the rolling z-score of the market's expected policy
+    move (1Y yield − FOMC target, in bps) from the enriched fed_expectation column. Positive =
+    market pricing HIKES (hawkish regime), negative = CUTS (dovish). A global macro series, so the
+    same curve broadcasts to every symbol."""
+    w = int(args.get("window", 60))
+    fe = panel.field_matrix("fed_expectation", tf)
+    if fe.empty or not fe.notna().any().any():
+        return _close(panel, tf) * np.nan
+    mu = fe.rolling(w, min_periods=_mp(w)).mean()
+    sd = fe.rolling(w, min_periods=_mp(w)).std().replace(0, np.nan)
+    return (fe - mu) / sd
+
+
+def fed_repricing(panel: NormPanel, args: dict, tf: str) -> pd.DataFrame:
+    """The repricing SHOCK: change in the FedWatch-style expectation over the lookback, in vol units
+    — how hard the rates market just repriced the policy path (the tradeable macro impulse). Built
+    from the enriched fed_expectation column."""
+    w = int(args.get("window", 20))
+    fe = panel.field_matrix("fed_expectation", tf)
+    if fe.empty or not fe.notna().any().any():
+        return _close(panel, tf) * np.nan
+    chg = fe.diff(w)
+    sd = chg.rolling(max(w, 60), min_periods=_mp(w)).std().replace(0, np.nan)
+    return chg / sd
+
+
 def cesi_surprise(panel: NormPanel, args: dict, tf: str) -> pd.DataFrame:
     """CESI-style standardized economic-surprise index (Citigroup Economic Surprise Index, native
     to FX/gold): the impact-weighted surprise normalized by its OWN trailing dispersion and
@@ -819,6 +846,8 @@ BUILDERS: Dict[str, Callable[[NormPanel, dict, str], pd.DataFrame]] = {
     "candlestick_pattern": candlestick_pattern, "order_block_strength": order_block_strength,
     "vol_regime_tag": vol_regime_tag, "cot_zscore": cot_zscore, "cot_index": cot_index,
     "news_sentiment": news_sentiment, "event_surprise": event_surprise,
+    # Fed policy expectation (CME-FedWatch-style, from FRED)
+    "fed_policy_bias": fed_policy_bias, "fed_repricing": fed_repricing,
 }
 
 

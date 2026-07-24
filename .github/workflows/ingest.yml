@@ -40,12 +40,13 @@ jobs:
       - name: Build the data lake
         env:
           OANDA_API_KEY: ${{ secrets.OANDA_API_KEY }}
+          FRED_API_KEY: ${{ secrets.FRED_API_KEY }}   # optional — FedWatch enrichment no-ops if unset
         run: |
           MARKETS="${{ github.event.inputs.markets || github.event.client_payload.markets || 'crypto,fx,xau' }}"
           TOPN="${{ github.event.inputs.top_n || github.event.client_payload.top_n || '100' }}"
           DEEP="${{ github.event.inputs.deep_months || github.event.client_payload.deep_months || '12' }}"
           python -m mt.run_ingest --markets "$MARKETS" --top-n "$TOPN" \
-            --deep-months "$DEEP" --macro --calendar --snapshot-id real
+            --deep-months "$DEEP" --macro --calendar --fedwatch --snapshot-id real
       - name: Cache the lake for the marathon
         uses: actions/cache/save@v4
         with:

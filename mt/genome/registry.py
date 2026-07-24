@@ -350,6 +350,15 @@ register(OpSpec("news_sentiment", "feature", {"window": _win(24, 4, 168)}, outpu
 register(OpSpec("event_surprise", "feature", {"window": _win(12, 2, 72)}, output="Series[zscore]",
                 data_requires=("calendar",), cost_class="cheap", tags=("macro", "calendar", "event"),
                 computable=True, doc="economic-event surprise (ForexFactory/MetalsMine/CryptoCraft)"))
+register(OpSpec("fed_policy_bias", "feature", {"window": _win(60, 10, 180)}, output="Series[zscore]",
+                data_requires=("fedwatch",), cost_class="cheap", tags=("macro", "rates", "regime"),
+                computable=True,
+                doc="CME-FedWatch-style Fed policy stance: z-score of expected policy move "
+                    "(1Y yield − FOMC target, FRED). +hawkish/hikes, −dovish/cuts"))
+register(OpSpec("fed_repricing", "feature", {"window": _win(20, 4, 90)}, output="Series[zscore]",
+                data_requires=("fedwatch",), cost_class="cheap", tags=("macro", "rates", "event"),
+                computable=True,
+                doc="rate-path repricing shock: vol-scaled change in the FedWatch-style expectation"))
 register(OpSpec("vol_regime_tag", "feature", {"tiers": ArgSpec("int", 3, 5, default=4)},
                 output="Series[zscore]", cost_class="medium",
                 tags=("regime", "ml_derived"), computable=True,

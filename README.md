@@ -45,7 +45,7 @@ pip install -r requirements.txt        # + optional: pip install numba  (JITs th
 **Locally**
 ```bash
 python -m mt.selftest_gauntlet         # go/no-go: rejects a planted overfit, admits a planted edge
-python -m mt.run_ingest --top-n 100 --deep-months 12 --macro --calendar   # build the real data lake
+python -m mt.run_ingest --top-n 100 --deep-months 12 --macro --calendar --fedwatch   # build the real data lake
 python -m mt.run_system --source lake --snapshot-id real --generations 4   # a bounded sprint (resets each run)
 python -m mt.run_continuous --source lake --generations 0                  # the marathon (accumulates; Ctrl-C to stop)
 python -m mt.run_genomes               # dump the live population → var/runs/genomes_current.md

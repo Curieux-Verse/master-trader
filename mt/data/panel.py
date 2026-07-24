@@ -25,7 +25,8 @@ FRAME_COLS = ["datetime", "open", "high", "low", "close", "volume", "atr_14", "f
               "ref_close",                          # benchmark close (BTC / gold) → cross-asset
               "fp_stacked", "fp_absorption",        # tick footprint (aggTrades) → stacked imbalance / absorption
               "cot_z", "news_tone",                 # CFTC COT positioning + GDELT news tone (mapped symbols)
-              "cal_surprise"]                       # ForexFactory/MetalsMine/CryptoCraft event surprise
+              "cal_surprise",                       # ForexFactory/MetalsMine/CryptoCraft event surprise
+              "fed_expectation"]                    # CME-FedWatch-style Fed policy expectation (FRED, global)
 SNAPSHOT_COLS = ["close", "ret_1", "atr_pct", "quote_volume_usd", "funding_rate"]
 
 

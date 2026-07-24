@@ -10,7 +10,7 @@
 | Crypto live/recent | Binance REST **v3** + WebSocket | Recent klines (≤1000/call, 2400 wt/min), live order flow, funding | Free | ⚠️ v1 klines/aggTrades REST **retire 2026-03-25** — use v3 endpoints |
 | Crypto multi-venue | **CCXT** (already in your `requirements.txt`) | Unified access to Binance/MEXC/Bybit; venue failover | Free (lib) | You already use this — MEXC primary, Binance/Bybit fallback |
 | **FX + XAU** | **OANDA v20 REST**, practice account | Historical candles + live pricing for FX majors and **XAUUSD**; free paper trading | Free (practice) | Rate-limited; practice rates differ slightly from live — fine for research |
-| Macro | **FRED** (St. Louis Fed) | Rates, macro series for regime/risk gauges | Free API key | Already used by `Macro_Compass` |
+| Macro | **FRED** (St. Louis Fed) | Rates, macro series for regime/risk gauges; **CME-FedWatch-style Fed policy expectation** (1Y yield − FOMC target → `fed_expectation`, PIT-lagged to the next-day H.15 release) via `mt.ingest.fedwatch` | Free API key (`FRED_API_KEY`, borrowed from the sibling stacks) | Already used by `Macro_Compass`. CME publishes no free FedWatch/ZQ API, so we reproduce the same signal from FRED |
 | Positioning | **CFTC COT** (Socrata) | Weekly futures positioning (upgrade to TFF report per your FX-scanner backlog) | Free | Weekly cadence; lag-aware |
 | News/sentiment | **GDELT** + **Finnhub** (free tier) | News flow, event sentiment | Free tier | Already wired in FX/XAU sentiment scanners; add retry/backoff (your backlog) |
 

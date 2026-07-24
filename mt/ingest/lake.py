@@ -175,6 +175,45 @@ def enrich_calendar(market: str, snapshot_id: str = "real", symbols: Optional[Li
     return enriched
 
 
+def enrich_fedwatch(market: str, snapshot_id: str = "real", symbols: Optional[List[str]] = None,
+                    start: str = "2015-01-01", log=print) -> int:
+    """Attach the CME-FedWatch-style Fed policy expectation (fed_expectation) to HTF bars. This is a
+    single GLOBAL macro series (1Y yield − FOMC target, PIT-lagged), so the SAME curve is broadcast
+    to every symbol — fetched once from FRED and reused for all frames."""
+    import json
+    from mt.ingest import fedwatch as fw
+    m = MARKETS[market]
+    man_path = LAKE_DIR / snapshot_id / market / "_snapshot.json"
+    if not man_path.exists():
+        log(f"    [{market}] no lake snapshot."); return 0
+    fed = fw.fetch_fed_expectation(start)
+    if fed is None or fed.empty:
+        log(f"    [{market}] no FRED Fed expectation (missing FRED_API_KEY?)."); return 0
+    fed = fed.copy(); fed["datetime"] = _us(fed["datetime"]); fed = fed.sort_values("datetime")
+    manifest = json.loads(man_path.read_text())
+    syms = symbols or manifest.get("symbols", [])
+    enriched = 0
+    for f in manifest.get("frames", []):
+        if f["tf"] != m.htf or f["symbol"] not in syms:
+            continue
+        try:
+            df = pd.read_parquet(f["path"])
+            df["datetime"] = _us(df["datetime"])
+            df = df.drop(columns=[c for c in ("fed_expectation",) if c in df.columns],
+                         errors="ignore").sort_values("datetime")
+            df = pd.merge_asof(df, fed, on="datetime", direction="backward")
+            for c in FRAME_COLS:
+                if c not in df.columns:
+                    df[c] = np.nan
+            df[FRAME_COLS].to_parquet(f["path"], index=False)
+            enriched += 1
+            log(f"    [{market}] {f['symbol']}: fed_expectation on {int(df['fed_expectation'].notna().sum())} bars")
+        except Exception as e:
+            log(f"    [{market}] {f['symbol']}: fedwatch error ({type(e).__name__}: {str(e)[:50]})")
+            continue
+    return enriched
+
+
 def _atr(df: pd.DataFrame, window: int = 14) -> np.ndarray:
     high, low, close = df["high"].to_numpy(), df["low"].to_numpy(), df["close"].to_numpy()
     prev = np.concatenate([[close[0]], close[:-1]])

@@ -97,6 +97,7 @@ def available_feeds(market: str) -> set:
         feeds.add("taker_buy")               # Binance klines carry taker-buy volume + trade count
     feeds.add("cross_asset")                 # ingest attaches a benchmark ref_close (BTC / gold)
     feeds.update({"cot", "news", "calendar"})   # COT + GDELT + FairEconomy calendars
+    feeds.add("fedwatch")                        # CME-FedWatch-style Fed policy expectation (FRED, global)
     return feeds
 
 

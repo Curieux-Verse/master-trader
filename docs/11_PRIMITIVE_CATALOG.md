@@ -204,6 +204,8 @@ Features are pure, stateless, point-in-time `Series → Series` transforms. The 
 | `cot_zscore` | `Series[zscore]` | `report∈{legacy,TFF}` | CFTC positioning (asset-mgr vs lev-fund) |
 | `news_sentiment` | `Series[zscore]` | `source`,`window` | GDELT/Finnhub (your scanners) |
 | `event_surprise` | `Series[zscore]` | `calendar` | actual vs consensus |
+| `fed_policy_bias` | `Series[zscore]` | `window` | CME-FedWatch-style stance: 1Y yield − FOMC target (FRED), z-scored; +hikes/−cuts |
+| `fed_repricing` | `Series[zscore]` | `window` | rate-path repricing shock (vol-scaled Δ of the FedWatch expectation) |
 | `macro_series` | `Series[zscore]` | `fred_id` | FRED rates/macro, PIT-lagged |
 | `hawk_dove_score` | `Series[zscore]` | — | continuous −10..+10 stance (your FX backlog) |
 
