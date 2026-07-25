@@ -64,22 +64,35 @@ def momentum_genome(lookback: int = 20, horizon: int = 2) -> Genome:
 
 
 def experiment_overfit_trap(seed: int = 1, k: int = 40) -> dict:
+    import statistics
     panel = make_panel(edge=False, seed=seed)
     sampler = TemplateSampler(seed=seed)
-    ctx = GauntletContext(eval_fn=lambda g, p: evaluate(g, p, seed), panel=panel, seed=seed)
     gauntlet = Gauntlet()
 
     best, best_res, best_sh = None, None, -np.inf
+    spps = []
     for _ in range(k):
         g = sampler._random("crypto")
         res = evaluate(g, panel, seed)
         if res.ok and np.isfinite(res.summary.get("net_sharpe", np.nan)):
+            spp = res.summary.get("sharpe_pp")
+            if spp is not None and np.isfinite(spp):
+                spps.append(float(spp))                       # per-observation Sharpe of each trial
             if res.summary["net_sharpe"] > best_sh:
                 best, best_res, best_sh = g, res, res.summary["net_sharpe"]
 
+    # The cross-trial Sharpe dispersion σ_SR the PRODUCTION Result Ledger computes from these N
+    # trials (store.sr_trial_std). It is the correct scale for DSR's E[max SR] deflation. WITHOUT
+    # it, G4 falls back to the candidate's own SE and under-deflates ~4× → the best-of-N selection
+    # overfit slips through G4 (the true multiple-testing firewall). Passing it makes the self-test
+    # exercise the gauntlet exactly as the marathon does, so the trap is caught by G4 — not by an
+    # incidental G3 behaviour (docs/05 §3, DSR Appendix 3).
+    sigma_sr = statistics.pstdev(spps) if len(spps) >= 8 else None
+    ctx = GauntletContext(eval_fn=lambda g, p: evaluate(g, p, seed), panel=panel, seed=seed,
+                          sr_trial_std=sigma_sr)
     report = gauntlet.run(best, best_res, trial_count=k, ctx=ctx)     # honest N = k tried
     return {"is_sharpe": best_sh, "passed": report.passed, "failed_gate": report.failed_gate,
-            "gates": report.gates}
+            "gates": report.gates, "sigma_sr": sigma_sr}
 
 
 def experiment_real_edge(seed: int = 2) -> dict:
@@ -132,6 +145,34 @@ def experiment_effective_n(seed: int = 5, k: int = 30) -> dict:
             "div_raw": div[0], "div_rho": div[1], "div_neff": div[2]}
 
 
+def experiment_directional_cpcv() -> dict:
+    """Directional CPCV must align variant returns by TIME, not by trade position (docs/14 review).
+    Three 'variants' realize returns on DIFFERENT bars (like directional trades at different times).
+    Time-alignment (the fix) yields the UNION calendar with flat bars = 0; the old position-tail
+    alignment would take the MIN length and mix different calendar times across columns. We assert
+    the union shape and exact flat-bar zeros — a check position-alignment cannot pass."""
+    from mt.gauntlet import cpcv
+    from mt.sim.evalresult import EvalResult
+    t = pd.date_range("2026-01-01", periods=100, freq="4h", tz="UTC")
+    canned = {0: pd.Series(0.010, index=t[::2]),     # trades on even bars (50)
+              1: pd.Series(0.010, index=t[1::2]),    # trades on odd bars  (50)
+              2: pd.Series(-0.005, index=t[::3])}    # every third bar      (34)
+    variants = list(canned)                          # 0,1,2 as opaque "variants"
+    def ev(v, _panel):
+        r = EvalResult(genome_id=str(v), market="crypto")
+        r.net_returns = canned[v]
+        return r
+    mat = cpcv.returns_matrix(variants, None, ev)
+    ok_shape = mat is not None and mat.shape == (100, 3)         # union calendar (NOT min=34)
+    # bar t[0] (even & divisible-by-3): var0 trades, var1 FLAT=0, var2 trades
+    row0_ok = ok_shape and np.allclose(mat[0], [0.010, 0.0, -0.005])
+    # bar t[1] (odd): var0 FLAT=0, var1 trades, var2 FLAT=0 (1 % 3 != 0)
+    row1_ok = ok_shape and np.allclose(mat[1], [0.0, 0.010, 0.0])
+    pbo = None if mat is None else cpcv.cscv_pbo(mat, n_groups=6)
+    return {"matrix_shape": None if mat is None else mat.shape,
+            "time_aligned": bool(row0_ok and row1_ok), "pbo_runs": pbo is not None}
+
+
 def run(verbose: bool = True) -> dict:
     try:                                        # Windows consoles default to cp1252; the report has ✓/✗
         import sys
@@ -141,10 +182,12 @@ def run(verbose: bool = True) -> dict:
     a = experiment_overfit_trap()
     b = experiment_real_edge()
     c = experiment_effective_n()
+    d = experiment_directional_cpcv()
     trap_ok = not a["passed"]                       # the overfit winner MUST be rejected
     edge_ok = bool(b["g4_significant"])             # the real edge MUST clear significance
     # correlated trials collapse (N_eff ≪ raw) AND diverse trials do not
     neff_ok = (c["dup_neff"] <= max(3, c["dup_raw"] // 3)) and (c["div_neff"] >= c["div_raw"] // 2)
+    dir_ok = bool(d["time_aligned"] and d["pbo_runs"])   # directional CPCV aligns by TIME, not position
     if verbose:
         print("=" * 72)
         print(" GAUNTLET SELF-TEST — the critical go/no-go (docs/09 P2)")
@@ -160,14 +203,18 @@ def run(verbose: bool = True) -> dict:
         print(f"    duplicates: ρ̄={c['dup_rho']}  N_eff={c['dup_neff']}/{c['dup_raw']}   "
               f"diverse: ρ̄={c['div_rho']}  N_eff={c['div_neff']}/{c['div_raw']}")
         print(f"    -> {'PASS ✓ (correlated trials collapse, diverse ones do not)' if neff_ok else 'FAIL ✗'}")
-        verdict = "TRUSTWORTHY" if (trap_ok and edge_ok and neff_ok) else "NOT TRUSTWORTHY — DO NOT PROCEED"
+        print(f"\n(D) Directional CPCV alignment: 3 variants trading on different bars → matrix {d['matrix_shape']}")
+        print(f"    -> {'PASS ✓ (aligned by TIME on the union calendar, flat bars = 0)' if dir_ok else 'FAIL ✗ (position-aligned / misaligned)'}")
+        ok = trap_ok and edge_ok and neff_ok and dir_ok
+        verdict = "TRUSTWORTHY" if ok else "NOT TRUSTWORTHY — DO NOT PROCEED"
         print("\n" + "=" * 72)
         print(f" RESULT: gauntlet is {verdict}")
         print("=" * 72)
-    return {"trap_ok": trap_ok, "edge_ok": edge_ok, "neff_ok": neff_ok, "overfit": a, "edge": b, "neff": c}
+    return {"trap_ok": trap_ok, "edge_ok": edge_ok, "neff_ok": neff_ok, "dir_ok": dir_ok,
+            "overfit": a, "edge": b, "neff": c, "directional": d}
 
 
 if __name__ == "__main__":
     import sys
     r = run()
-    sys.exit(0 if (r["trap_ok"] and r["edge_ok"] and r["neff_ok"]) else 1)
+    sys.exit(0 if (r["trap_ok"] and r["edge_ok"] and r["neff_ok"] and r["dir_ok"]) else 1)

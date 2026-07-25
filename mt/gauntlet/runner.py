@@ -58,26 +58,31 @@ class Gauntlet:
         ppy = float(res.summary.get("periods_per_year", 365.0))
         seed = ctx.seed if ctx else res.seed
 
-        # cheap → expensive (all enforced; first failure short-circuits the rest)
+        # cheap → expensive; STOP at the first enforced failure (successive halving over the
+        # gauntlet). Gates are thunks so the expensive rungs — G3 CPCV (m extra backtests) and G6
+        # transfer (a holdout backtest) — only run for candidates that already survived everything
+        # cheaper, instead of for every genome. Admission is unchanged; only wasted compute is cut.
         sr_std = ctx.sr_trial_std if ctx else None
-        ordered = [
-            G.g1_sanity(net),
-            G.g4_deflated_sharpe(net, trial_count, ann_factor=ppy, sr_trial_std=sr_std),
-            G.g4b_reality_check(net, trial_count, seed=seed),
-            G.g5_robustness(net, seed=seed),
-            G.g2_oos_degradation(net),
-            G.g7_capacity(genome, res, ctx),
-            G.g8_orthogonality(res, ctx),
-            G.g3_cpcv_pbo(genome, ctx),
-            G.g6_transfer(genome, ctx),
+        gate_thunks = [
+            lambda: G.g1_sanity(net),
+            lambda: G.g4_deflated_sharpe(net, trial_count, ann_factor=ppy, sr_trial_std=sr_std),
+            lambda: G.g4b_reality_check(net, trial_count, seed=seed),
+            lambda: G.g5_robustness(net, seed=seed),
+            lambda: G.g2_oos_degradation(net),
+            lambda: G.g7_capacity(genome, res, ctx),
+            lambda: G.g8_orthogonality(res, ctx),
+            lambda: G.g3_cpcv_pbo(genome, ctx),
+            lambda: G.g6_transfer(genome, ctx),
         ]
 
         passed_all = True
-        for gate in ordered:
+        for thunk in gate_thunks:
+            gate = thunk()
             report.gates[gate.name] = {"status": gate.status, "reason": gate.reason, **gate.stats}
-            if gate.enforced and not gate.passed and passed_all:
+            if gate.enforced and not gate.passed:
                 passed_all = False
                 report.failed_gate = gate.name
+                break
 
         report.passed = passed_all
         report.fitness = self._fitness(genome, res, report)

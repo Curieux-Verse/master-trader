@@ -23,19 +23,38 @@ from mt.genome.registry import REGISTRY
 from mt.genome.schema import Genome
 
 
+def _perturb(op_name: str, args: dict, rng: np.random.Generator) -> int:
+    """Perturb the NUMERIC (int/float) args of one op in-place; return how many were changed.
+    `mutate` is a no-op for choice/bool kinds, so only tunable numerics move."""
+    spec = REGISTRY.get(op_name)
+    if not spec:
+        return 0
+    n = 0
+    for k, aspec in spec.args.items():
+        if aspec.kind in ("int", "float") and k in args:
+            args[k] = aspec.mutate(args[k], rng)
+            n += 1
+    return n
+
+
 def param_variants(genome: Genome, m: int, rng: np.random.Generator) -> List[Genome]:
-    """m genomes: the original + (m-1) with perturbed *numeric feature* args only, so all
-    variants share the same rebalance grid and their return series stay alignable."""
+    """m genomes: the original + (m-1) with perturbed numeric args across the WHOLE genome —
+    feature AND signal/sizing/risk (horizon, top_frac, thresholds, sl/tp mults, …). Perturbing
+    only *feature* args (the old behaviour) meant a genome whose features expose no int/float
+    args (e.g. order_block_strength, fvg_gap, atr_pct, candlestick_pattern) produced m IDENTICAL
+    variants → CSCV scored PBO=1.0 and G3 rejected it deterministically, a false reject unrelated
+    to overfitting. Widening to all tunable numerics gives such genomes a genuine parameter
+    neighbourhood (they still share the rebalance grid). If a genome has NO tunable numeric arg
+    anywhere, the variants stay identical and `returns_matrix` returns None → G3 DEFERS (never
+    auto-fails)."""
     variants = [genome]
     for _ in range(m - 1):
         v = copy.deepcopy(genome)
         for f in v.features:
-            spec = REGISTRY.get(f.op)
-            if not spec:
-                continue
-            for k, aspec in spec.args.items():
-                if aspec.kind in ("int", "float") and k in f.args:
-                    f.args[k] = aspec.mutate(f.args[k], rng)
+            _perturb(f.op, f.args, rng)
+        _perturb(v.signal.op, v.signal.args, rng)
+        _perturb(v.sizing.op, v.sizing.args, rng)
+        _perturb(v.risk.op, v.risk.args, rng)
         v.generator = "cpcv_variant"
         variants.append(v)
     return variants
@@ -52,11 +71,24 @@ def returns_matrix(variants: List[Genome], panel, eval_fn: Callable) -> Optional
         r = eval_fn(v, panel).net_returns
         if r is None or len(r) < 20:
             return None
-        series.append(np.asarray(r.to_numpy(), dtype=float))
-    m = min(len(a) for a in series)
-    if m < 20:
+        s = r if isinstance(r, pd.Series) else pd.Series(r)
+        # collapse duplicate timestamps (directional: several per-symbol exits close on one bar) so
+        # the index is unique and variants can align on a COMMON CALENDAR rather than by trade order.
+        series.append(s.groupby(level=0).sum())
+    # Align columns on the UNION of timestamps; a bar where a variant held no position contributes 0
+    # (flat). THIS is what makes the CSCV time-split + purge/embargo valid for DIRECTIONAL genomes
+    # (and for cross-sectional variants whose perturbed horizon changes the rebalance grid). Position
+    # tail-alignment mixed different calendar times across columns → an invalid PBO (docs/05 G3, docs/14).
+    df = pd.concat(series, axis=1).sort_index().fillna(0.0)
+    if df.shape[0] < 20 or df.shape[1] < 2:
         return None
-    return np.column_stack([a[-m:] for a in series])
+    mat = df.to_numpy(dtype=float)
+    # PBO is undefined without ≥2 DISTINCT configurations: identical columns make the IS-best the
+    # arbitrary first column and force PBO→1.0, a false reject. When the genome could not be
+    # perturbed into distinct variants, return None so G3 DEFERS instead of auto-failing.
+    if len({tuple(np.round(mat[:, j], 12)) for j in range(mat.shape[1])}) < 2:
+        return None
+    return mat
 
 
 def _col_sharpe(mat: np.ndarray) -> np.ndarray:
