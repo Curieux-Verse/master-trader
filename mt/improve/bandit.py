@@ -67,3 +67,15 @@ class EngineBandit:
 
     def weights(self) -> Dict[str, float]:
         return {e: self.alpha[e] / (self.alpha[e] + self.beta[e]) for e in self.engines}
+
+    # ─── persistence so the meta-controller compounds across marathons (docs/14) ──
+    def snapshot(self) -> tuple:
+        """(alpha, beta) copies for saving to the store."""
+        return dict(self.alpha), dict(self.beta)
+
+    def restore(self, state: Dict[str, tuple]) -> None:
+        """Reload learned Beta posteriors ({engine: (alpha, beta)}) from a prior marathon, so the
+        engine that was earning its keep keeps its budget instead of resetting to a uniform prior."""
+        for e, ab in (state or {}).items():
+            if e in self.alpha and ab:
+                self.alpha[e] = float(ab[0]); self.beta[e] = float(ab[1])

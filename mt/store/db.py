@@ -87,7 +87,56 @@ CREATE TABLE IF NOT EXISTS attributions (
     delta_z     REAL,
     created_at  REAL
 );
+CREATE TABLE IF NOT EXISTS hall_of_fame (
+    genome_id   TEXT PRIMARY KEY,
+    market      TEXT,
+    dsr_z       REAL,
+    scalar_fit  REAL,
+    passed      INTEGER,
+    fitness     TEXT,
+    sharpe_pp   REAL,
+    first_seen  REAL,
+    updated_at  REAL
+);
+CREATE INDEX IF NOT EXISTS ix_hof_z ON hall_of_fame(dsr_z);
+CREATE INDEX IF NOT EXISTS ix_hof_market_z ON hall_of_fame(market, dsr_z);
+CREATE TABLE IF NOT EXISTS bandit_state (
+    market      TEXT,
+    engine      TEXT,
+    alpha       REAL,
+    beta        REAL,
+    updated_at  REAL,
+    PRIMARY KEY (market, engine)
+);
+CREATE TABLE IF NOT EXISTS champion_track (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    market      TEXT,
+    genome_id   TEXT,
+    dsr_z       REAL,
+    oos_sharpe  REAL,
+    oos_dsr_z   REAL,
+    runs_held   INTEGER,
+    created_at  REAL
+);
+CREATE INDEX IF NOT EXISTS ix_champion_market ON champion_track(market, created_at);
 """
+
+
+def _hof_scalarize(fitness: dict) -> float:
+    """The Gauntlet's scalarization, replicated here (avoids a store→runner import cycle) so the
+    hall-of-fame and the backfill agree with mt.gauntlet.runner._scalarize on a genome's rank."""
+    if not fitness:
+        return float("-inf")
+    ds = fitness.get("deflated_sharpe")
+    if ds is None:
+        ds = fitness.get("net_sharpe")
+    if ds is None:
+        ds = 0.0
+    base = float(ds)
+    omp = fitness.get("one_minus_pbo")
+    if omp is not None:
+        base *= max(0.0, float(omp))
+    return base - 0.05 * abs(float(fitness.get("neg_complexity", 0) or 0))
 
 
 class MTStore:
@@ -289,6 +338,118 @@ class MTStore:
 
     def archive_rows(self) -> List[sqlite3.Row]:
         return list(self.conn.execute("SELECT * FROM archive ORDER BY scalar_fit DESC"))
+
+    # ─── Hall of Fame (persistent best-ever memory, independent of the pass bar) ──
+    def upsert_hof(self, genome_id: str, market: str, dsr_z: Optional[float], scalar_fit: float,
+                   passed: bool, fitness: dict, sharpe_pp: Optional[float] = None) -> str:
+        """Retain a genome's BEST-ever Deflated-Sharpe z. Unlike the archive (which admits only
+        gauntlet PASSERS and so stays empty until an edge clears), the hall-of-fame keeps the
+        search's closest approaches too — so best-z is an ALL-TIME high-water mark that ratchets
+        across marathons, and warm-start has elites to breed from. This is a search-memory /
+        reporting device; it does NOT relax any gate (tradeable still requires clearing G4)."""
+        import math
+        if dsr_z is None or not math.isfinite(float(dsr_z)):
+            return "skip"
+        z = float(dsr_z); now = time.time()
+        row = self.conn.execute("SELECT dsr_z FROM hall_of_fame WHERE genome_id=?", (genome_id,)).fetchone()
+        if row is None:
+            self.conn.execute(
+                "INSERT INTO hall_of_fame(genome_id,market,dsr_z,scalar_fit,passed,fitness,sharpe_pp,"
+                "first_seen,updated_at) VALUES(?,?,?,?,?,?,?,?,?)",
+                (genome_id, market, z, float(scalar_fit), int(bool(passed)), json.dumps(fitness),
+                 sharpe_pp, now, now))
+            self.conn.commit()
+            return "occupy"
+        if z > (row["dsr_z"] if row["dsr_z"] is not None else float("-inf")):
+            self.conn.execute(
+                "UPDATE hall_of_fame SET dsr_z=?, scalar_fit=?, passed=?, fitness=?, sharpe_pp=?, "
+                "updated_at=? WHERE genome_id=?",
+                (z, float(scalar_fit), int(bool(passed)), json.dumps(fitness), sharpe_pp, now, genome_id))
+            self.conn.commit()
+            return "replace"
+        return "keep"
+
+    def best_z_alltime(self, market: Optional[str] = None) -> Optional[float]:
+        """The all-time high-water mark of Deflated-Sharpe z — the honest cross-marathon progress
+        metric (the per-run z_trend resets each run; this does not)."""
+        q = "SELECT MAX(dsr_z) FROM hall_of_fame"
+        params: tuple = ()
+        if market:
+            q += " WHERE market=?"; params = (market,)
+        r = self.conn.execute(q, params).fetchone()
+        return None if (r is None or r[0] is None) else float(r[0])
+
+    def hof_top(self, market: Optional[str] = None, limit: int = 12) -> List[sqlite3.Row]:
+        """Top-K genomes by best-ever dsr_z — the challenger pool and the warm-start seed set."""
+        q = "SELECT genome_id, market, dsr_z, scalar_fit, passed, fitness, sharpe_pp FROM hall_of_fame"
+        params: tuple = ()
+        if market:
+            q += " WHERE market=?"; params = (market,)
+        q += " ORDER BY dsr_z DESC LIMIT ?"
+        return list(self.conn.execute(q, params + (int(limit),)))
+
+    def backfill_hof(self) -> int:
+        """One-time seed of the hall-of-fame from historical gauntlet_reports (dsr_z lives in the
+        gates JSON, fitness in its own column). Lets an already-accumulated brain surface its
+        best-ever genomes immediately, instead of building the HoF only from post-upgrade evals.
+        Idempotent: no-ops once the HoF has any row."""
+        if self.conn.execute("SELECT 1 FROM hall_of_fame LIMIT 1").fetchone():
+            return 0
+        n = 0
+        cur = self.conn.execute("SELECT genome_id, market, passed, gates, fitness FROM gauntlet_reports")
+        for row in cur.fetchall():
+            try:
+                gates = json.loads(row["gates"]) if row["gates"] else {}
+                fit = json.loads(row["fitness"]) if row["fitness"] else {}
+            except Exception:
+                continue
+            z = (gates.get("G4_deflated_sharpe", {}) or {}).get("dsr_z")
+            if z is None:
+                continue
+            self.upsert_hof(row["genome_id"], row["market"], z, _hof_scalarize(fit),
+                            bool(row["passed"]), fit, fit.get("net_sharpe"))
+            n += 1
+        return n
+
+    # ─── Engine bandit state (so the meta-controller compounds across marathons) ──
+    def save_bandit(self, market: str, alpha: dict, beta: dict) -> None:
+        now = time.time()
+        for e in alpha:
+            self.conn.execute(
+                "INSERT INTO bandit_state(market,engine,alpha,beta,updated_at) VALUES(?,?,?,?,?) "
+                "ON CONFLICT(market,engine) DO UPDATE SET alpha=excluded.alpha, beta=excluded.beta, "
+                "updated_at=excluded.updated_at",
+                (market, e, float(alpha[e]), float(beta.get(e, 1.0)), now))
+        self.conn.commit()
+
+    def load_bandit(self, market: str) -> Optional[dict]:
+        rows = self.conn.execute(
+            "SELECT engine, alpha, beta FROM bandit_state WHERE market=?", (market,)).fetchall()
+        if not rows:
+            return None
+        return {r["engine"]: (float(r["alpha"]), float(r["beta"])) for r in rows}
+
+    # ─── Champion / challenger track (OOS certification over weeks; NOT the trial ledger) ──
+    def record_champion(self, market: str, genome_id: str, dsr_z: Optional[float],
+                        oos_sharpe: Optional[float], oos_dsr_z: Optional[float], runs_held: int) -> None:
+        self.conn.execute(
+            "INSERT INTO champion_track(market,genome_id,dsr_z,oos_sharpe,oos_dsr_z,runs_held,created_at)"
+            " VALUES(?,?,?,?,?,?,?)",
+            (market, genome_id, dsr_z, oos_sharpe, oos_dsr_z, int(runs_held), time.time()))
+        self.conn.commit()
+
+    def champion_reign(self, market: str, genome_id: str) -> int:
+        """How many consecutive digests this genome has been the standing champion (its reign)."""
+        rows = self.conn.execute(
+            "SELECT genome_id FROM champion_track WHERE market=? ORDER BY created_at DESC LIMIT 200",
+            (market,)).fetchall()
+        reign = 0
+        for r in rows:
+            if r["genome_id"] == genome_id:
+                reign += 1
+            else:
+                break
+        return reign
 
     # ─── Lessons (thin) ──────────────────────────────────────────────────
     def add_lesson(self, text: str, tags: str = "") -> bool:

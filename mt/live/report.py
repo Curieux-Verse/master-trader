@@ -28,12 +28,25 @@ def format_system_report(rep: Dict) -> str:
     if disc.get("convergence"):
         best = disc.get("dsr_z_best"); gap = disc.get("dsr_gap_to_significance")
         br = disc.get("best_z_recent"); be = disc.get("best_z_early")
-        L.append(f"   discovery (best-z) : best z={('—' if best is None else f'{best:+.2f}')}"
-                 f"   gap to G4={('—' if gap is None else f'{gap:+.2f}')}"
+        this_run = disc.get("this_run_best_z")
+        L.append(f"   discovery (best-z) : best z={('—' if best is None else f'{best:+.2f}')} (all-time)"
+                 + ("" if this_run is None else f"   this run={this_run:+.2f}")
+                 + f"   gap to G4={('—' if gap is None else f'{gap:+.2f}')}"
                  f"   (z=0 luck bar; pass needs z≳1.64)")
         if be is not None and br is not None:
             L.append(f"     best-z early→recent: {be:+.2f} → {br:+.2f}   (this is the signal that matters)")
         L.append(f"   exploration floor  : {disc['convergence']}")
+
+    champs = rep.get("champions", [])
+    if champs:
+        L.append(f"\n▸ CHAMPIONS  (best-ever per market; re-validated OOS on the unseen holdout)")
+        for c in champs:
+            oos = c.get("oos_sharpe"); ooz = c.get("oos_dsr_z")
+            L.append(f"   [{c.get('market',''):6}] z={c.get('dsr_z',0):+.2f}  reign={c.get('reign',1)}  "
+                     f"OOS-sharpe={('—' if oos is None else f'{oos:+.2f}')}  "
+                     f"OOS-z={('—' if ooz is None else f'{ooz:+.2f}')}  "
+                     f"{'(cleared G4)' if c.get('cleared') else '(challenger)'}")
+            L.append(f"           {c.get('prose','')}")
 
     arch = rep.get("archive", {})
     L.append(f"\n▸ ARCHIVE  ({arch.get('coverage', 0)} diverse niches)")
@@ -109,10 +122,26 @@ def format_telegram_report(rep: Dict) -> str:
     L.append("")
 
     if bz is not None:
-        L.append("🎯 <b>Closest to an edge</b>")
+        this_run = disc.get("this_run_best_z")
+        L.append("🎯 <b>Closest to an edge</b> <i>(all-time)</i>")
         L.append(_gauge(bz))
         L.append(f"best-z <b>{bz:+.2f}</b> · needs <b>+1.64</b> · gap <b>{gap:+.2f}</b>")
+        if this_run is not None and this_run < bz - 1e-9:
+            L.append(f"<i>this run so far: {this_run:+.2f} · all-time high-water held</i>")
         L.append("<i>z 0 = luck · above 1.64 = real edge</i>")
+        L.append("")
+
+    champs = rep.get("champions", [])
+    if champs:
+        L.append("👑 <b>Standing champion</b> <i>(best-ever, re-checked out-of-sample)</i>")
+        for c in champs[:3]:
+            oos = c.get("oos_sharpe"); ooz = c.get("oos_dsr_z")
+            held = c.get("reign", 1)
+            tail = (f" · OOS sharpe {oos:+.2f}" if oos is not None else "")
+            tail += (f" · OOS-z {ooz:+.2f}" if ooz is not None else "")
+            L.append(f"   <b>{html.escape(str(c.get('market', '')))}</b> z {c.get('dsr_z', 0):+.2f} · "
+                     f"held {held}×{tail}")
+            L.append(f"   <i>{html.escape(str(c.get('prose', ''))[:90])}</i>")
         L.append("")
 
     L.append("🔬 <b>Discovery</b>")

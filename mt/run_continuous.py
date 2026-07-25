@@ -24,8 +24,47 @@ import numpy as np
 from mt.config import DB_PATH, RUNS_DIR, DEFAULT_SEED
 from mt.store import MTStore
 from mt.improve import DiscoveryLoop
+from mt.sim import evaluate
 from mt.run_system import _build_panels, _convergence, _pretty_lessons
 from mt.live.report import format_system_report, format_telegram_report, send_telegram
+
+
+def _champions(store, loops):
+    """Champion/challenger certification (docs/14): the standing champion per market is the top
+    hall-of-fame genome. Re-validate it on the UNSEEN holdout each digest — an out-of-sample check
+    that a genome is not just an in-sample high — and track its reign (how many consecutive digests
+    it has held). The OOS re-eval is NOT written to the result ledger, so the honest Deflated-Sharpe
+    trial count is untouched (re-testing a known champion is not a new hypothesis). This is how the
+    'best strategy' is certified over weeks — by surviving repeated OOS challenges, not one run's z."""
+    from mt.adapters.cclib import deflated_sharpe
+    out = []
+    for m, loop in loops.items():
+        rows = store.hof_top(m, limit=1)
+        if not rows:
+            continue
+        r = rows[0]; gid = r["genome_id"]; g = store.get_genome(gid)
+        if g is None:
+            continue
+        oos_sharpe = oos_z = None
+        holdout = getattr(loop, "holdout", None)
+        if holdout is not None:
+            try:
+                res = evaluate(g, holdout, loop.seed)          # unseen data; deliberately NOT ledgered
+                if res.ok:
+                    oos_sharpe = res.summary.get("net_sharpe")
+                    rho = store.avg_trial_corr(m)
+                    n_eff = store.effective_trial_count(m, rho)
+                    d = deflated_sharpe(res.net_returns.tolist(), n_trials=max(1, n_eff),
+                                        sr_trial_std=store.sr_trial_std(m))
+                    oos_z = d.get("dsr_z_score")
+            except Exception:
+                pass
+        reign = store.champion_reign(m, gid) + 1
+        store.record_champion(m, gid, r["dsr_z"], oos_sharpe, oos_z, reign)
+        out.append({"market": m, "genome_id": gid, "dsr_z": r["dsr_z"], "prose": g.to_prose()[:90],
+                    "oos_sharpe": oos_sharpe, "oos_dsr_z": oos_z, "reign": reign,
+                    "cleared": bool(r["passed"])})
+    return out
 
 
 def run(markets, generations, batch_size, seed, source, snapshot_id, structure,
@@ -39,6 +78,10 @@ def run(markets, generations, batch_size, seed, source, snapshot_id, structure,
         from mt.run_system import _reset_db
         _reset_db()
     store = MTStore()
+    seeded = store.backfill_hof()            # one-time: surface an existing brain's best-ever genomes
+    if seeded:
+        print(f"  hall-of-fame backfilled from {seeded} historical gauntlet reports "
+              f"(all-time best-z = {store.best_z_alltime()})")
     floor = explore_floor if explore_floor is not None else {"evo": 0.3, "miner": 0.2}
 
     print("=" * 72)
@@ -57,7 +100,11 @@ def run(markets, generations, batch_size, seed, source, snapshot_id, structure,
         loops[m] = DiscoveryLoop(store, m, panel, holdout, seed=seed,
                                  use_ollama=use_ollama, explore_floor=floor)
         active.append(m)
-        print(f"  [{m}] {len(panel.symbols)} symbols × {panel.close_matrix().shape[0]} train bars")
+        ws = getattr(loops[m], "warm_started", 0)
+        bstate = "restored" if store.load_bandit(m) else "fresh"
+        print(f"  [{m}] {len(panel.symbols)} symbols × {panel.close_matrix().shape[0]} train bars"
+              + (f"  · warm-started {ws} elites from hall-of-fame · bandit {bstate}" if ws else
+                 f"  · no HoF yet (cold start) · bandit {bstate}"))
     if not active:
         print("  No markets have data — run mt.run_ingest first.")
         store.close(); return
@@ -87,7 +134,7 @@ def run(markets, generations, batch_size, seed, source, snapshot_id, structure,
             admitted = store.conn.execute("SELECT COUNT(*) FROM gauntlet_reports WHERE passed=1").fetchone()[0]
             if gen % report_every == 0 or (generations > 0 and gen == generations):
                 _digest(store, markets, z_trend, fam_all, pheno_all, gen, arch, admitted, t0,
-                        bandit=loops[markets[0]].bandit.weights())
+                        bandit=loops[markets[0]].bandit.weights(), loops=loops)
             else:
                 et = z_trend[-1]["edge_t_median"]; zb = z_trend[-1]["z_best"]
                 print(f"  gen {gen:4}: archive={arch:3} admitted={admitted:3} N={store.trial_count():6} "
@@ -96,7 +143,7 @@ def run(markets, generations, batch_size, seed, source, snapshot_id, structure,
         print("\n  ⏹  interrupted — writing final report…")
 
     _digest(store, markets, z_trend, fam_all, pheno_all, gen, arch, admitted, t0, final=True,
-            bandit=loops[markets[0]].bandit.weights())
+            bandit=loops[markets[0]].bandit.weights(), loops=loops)
     store.close()
 
 
@@ -104,10 +151,12 @@ def _f(x):
     return "—" if x is None else f"{x:+.2f}"
 
 
-def _digest(store, markets, z_trend, fam_all, pheno_all, gen, arch, admitted, t0, final=False, bandit=None):
+def _digest(store, markets, z_trend, fam_all, pheno_all, gen, arch, admitted, t0, final=False,
+            bandit=None, loops=None):
     gr = store.conn.execute("SELECT passed, COUNT(*) FROM gauntlet_reports GROUP BY passed").fetchall()
     passed = sum(c for p, c in gr if p); rejected = sum(c for p, c in gr if not p)
     rho = store.avg_trial_corr()
+    bz_all = store.best_z_alltime()          # persisted all-time high-water mark → best-z ratchets
     rep = {
         "started": datetime.now(timezone.utc).isoformat(),
         "elapsed_s": round(time.time() - t0, 1), "markets": markets,
@@ -118,9 +167,10 @@ def _digest(store, markets, z_trend, fam_all, pheno_all, gen, arch, admitted, t0
                       "trial_corr": None if rho is None else round(rho, 4),
                       "effective_trials": store.effective_trial_count(None, rho),
                       "bandit": {k: round(v, 3) for k, v in (bandit or {}).items()},
-                      **_convergence(z_trend)},
+                      **_convergence(z_trend, best_z_floor=bz_all)},
         "archive": {"coverage": arch, "elites": [{"niche": r["niche_key"], "fit": r["scalar_fit"],
                     "market": r["market"]} for r in store.archive_rows()[:8]]},
+        "champions": _champions(store, loops) if loops else [],
         "paper": {}, "lessons": store.lesson_count(),
         "recent_lessons": _pretty_lessons(store.recent_lessons(4)),
     }

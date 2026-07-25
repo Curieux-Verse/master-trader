@@ -2,9 +2,11 @@ name: marathon
 
 # The unattended, self-improving discovery loop. Restores the lake + the accumulated "brain"
 # (var/mt.db) from cache, runs discovery for a wall-clock budget, saves the brain back, commits
-# a human-readable digest to runs/, and pings Telegram. Because the DB carries archive + lessons
-# + minted vocabulary + bandit learning across runs, discovery COMPOUNDS session to session — no
-# machine needs to stay on. NO capital is ever placed.
+# a human-readable digest to runs/, and pings Telegram. Because the DB carries the hall-of-fame
+# (best-ever genomes → an all-time best-z that ratchets), the QD archive, lessons, minted
+# vocabulary, the engine bandit, AND warm-starts evolution from that frontier, discovery genuinely
+# COMPOUNDS session to session (docs/14) — no machine needs to stay on. A durable state-branch
+# snapshot guards the brain against >7-day cache eviction. NO capital is ever placed.
 #
 # TRIGGERING: fire it from an EXTERNAL scheduler (e.g. cron-job.org) via the GitHub API —
 #   POST https://api.github.com/repos/Curieux-Verse/master-trader/dispatches
@@ -66,6 +68,27 @@ jobs:
           key: mtdb-${{ github.run_id }}
           restore-keys: mtdb-
 
+      # Belt-and-suspenders durability (docs/14): the cache is fast but GitHub EVICTS it after 7
+      # days of no access — a pause > 1 week would silently wipe weeks of compounding. If the cache
+      # missed, restore the brain from the long-lived `state` branch snapshot (integrity-checked).
+      - name: Durable-snapshot fallback (if brain cache missed)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ -f var/mt.db ]; then
+            echo "brain restored from cache — durable snapshot not needed"
+          else
+            echo "brain cache miss — trying durable state-branch snapshot…"
+            if git fetch --depth 1 "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" state 2>/dev/null; then
+              git show FETCH_HEAD:mt.db.gz > "$RUNNER_TEMP/mt.db.gz" 2>/dev/null \
+                && python -m mt.store.snapshot restore --in "$RUNNER_TEMP/mt.db.gz" --db var/mt.db \
+                && echo "brain restored from durable snapshot (survived cache eviction)" \
+                || echo "no usable durable snapshot yet (first run?)"
+            else
+              echo "no 'state' branch yet (first run?) — starting a fresh brain"
+            fi
+          fi
+
       - name: Run the marathon
         env:
           SMC_BOT_TOKEN: ${{ secrets.SMC_BOT_TOKEN }}
@@ -84,6 +107,29 @@ jobs:
         with:
           path: var/mt.db
           key: mtdb-${{ github.run_id }}
+
+      # Push a compressed, integrity-checked snapshot to a single-commit `state` branch (docs/14).
+      # This is the durable copy the fallback above restores from — so a >7-day pause can no longer
+      # evict the accumulating brain. Force-push keeps `state` at one commit (no history bloat).
+      - name: Persist durable brain snapshot (state branch)
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          [ -f var/mt.db ] || { echo "no brain to snapshot"; exit 0; }
+          python -m mt.store.snapshot save --db var/mt.db --out "$RUNNER_TEMP/mt.db.gz"
+          tmp="$RUNNER_TEMP/state"; rm -rf "$tmp"
+          git clone --depth 1 "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "$tmp"
+          cd "$tmp"
+          git checkout --orphan state_new
+          git rm -rf . >/dev/null 2>&1 || true
+          cp "$RUNNER_TEMP/mt.db.gz" mt.db.gz
+          git add mt.db.gz
+          git -c user.name="master-trader-bot" \
+              -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+              commit -m "state: brain snapshot $(date -u +%FT%TZ) [skip ci]"
+          git push -f origin state_new:state
+          echo "durable snapshot pushed to 'state' branch ($(du -h mt.db.gz | cut -f1))"
 
       - name: Publish research log
         if: always()

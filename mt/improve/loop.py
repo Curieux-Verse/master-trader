@@ -8,6 +8,7 @@ niches by behaviour, and no family is privileged — the Gauntlet decides.
 """
 from __future__ import annotations
 
+import json
 from collections import Counter
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
@@ -17,7 +18,7 @@ import numpy as np
 from mt.generators import TemplateSampler
 from mt.genome.schema import Genome, SignalSpec, SizingSpec, RiskSpec
 from mt.sim import evaluate
-from mt.gauntlet import Gauntlet, GauntletContext
+from mt.gauntlet import Gauntlet, GauntletContext, GauntletReport
 from mt.archive import MapElites
 from mt.store import MTStore
 from mt.improve import nsga2, miner as miner_mod
@@ -46,6 +47,7 @@ class DiscoveryLoop:
         self.explore_floor = explore_floor
         self.sampler = TemplateSampler(seed=seed)
         self.bandit = EngineBandit(seed=seed)
+        self.bandit.restore(store.load_bandit(market))       # compound the meta-controller (docs/14)
         self.gauntlet = Gauntlet()
         self.archive = MapElites(store)
         self.rng = np.random.default_rng(seed)
@@ -53,6 +55,29 @@ class DiscoveryLoop:
         self.archive_returns: Dict[str, np.ndarray] = {}
         self.pending_mutations: List[Genome] = []
         self.generation = 0
+        self.warm_started = self._warm_start_parents()       # seed evolution from the best-ever frontier
+
+    def _warm_start_parents(self, k: int = 12) -> int:
+        """Seed the NSGA-II parent pool from the hall-of-fame so evolution CONTINUES from the
+        best-ever frontier instead of re-exploring from random every marathon (docs/14). Parents
+        are reconstructed from the PERSISTED report fitness — no re-evaluation, so the honest
+        Deflated-Sharpe trial count is untouched (re-testing a known genome is not a new trial)."""
+        pool: List[Tuple[Genome, object]] = []
+        for r in self.store.hof_top(self.market, limit=k):
+            g = self.store.get_genome(r["genome_id"])
+            if g is None or not g.typecheck()[0]:
+                continue
+            try:
+                fitness = json.loads(r["fitness"]) if r["fitness"] else {}
+            except Exception:
+                fitness = {}
+            sf = r["scalar_fit"]
+            rep = GauntletReport(genome_id=r["genome_id"], market=self.market, passed=bool(r["passed"]),
+                                 failed_gate=None, gates={}, fitness=fitness,
+                                 scalar_fitness=float(sf) if sf is not None else 0.0)
+            pool.append((g, rep))
+        self.parents = pool
+        return len(pool)
 
     # ─── one generation ──────────────────────────────────────────────────
     def run_generation(self, batch_size: int = 16) -> dict:
@@ -109,6 +134,17 @@ class DiscoveryLoop:
             z = (report.gates.get("G4_deflated_sharpe", {}) or {}).get("dsr_z")
             if z is not None and np.isfinite(z):
                 dsr_z.append(float(z))
+                # persist the best-ever high-water mark (independent of the pass bar) so best-z
+                # ratchets across marathons and warm-start has elites to breed from (docs/14).
+                self.store.upsert_hof(g.genome_id, self.market, float(z), report.scalar_fitness,
+                                      report.passed, report.fitness, res.summary.get("sharpe_pp"))
+                if not report.passed:
+                    # dense shaping: credit the engine for producing NEAR-MISSES too, scaled by how
+                    # close to the bar — but capped at 0.25, strictly below the keep(0.3)/occupy(1.0)
+                    # rewards, so clearing the gauntlet always dominates. Without this the bandit gets
+                    # zero signal until something passes (which, on an efficient market, may be never),
+                    # so it never learns which engine is closing the gap (docs/14).
+                    reward = max(reward, min(0.25, 0.25 * max(0.0, float(z) / 1.645)))
                 if z > 0.5 and len(g.features) > 1:          # near-miss → measure which feature carried it
                     self._attribute(g, float(z), n_eff, sr_std)
             spp = res.summary.get("sharpe_pp"); npd = res.summary.get("n_periods", 0)
@@ -129,6 +165,8 @@ class DiscoveryLoop:
             self.parents = []
 
         mix.weights = self.bandit.weights()
+        a, b = self.bandit.snapshot()
+        self.store.save_bandit(self.market, a, b)            # persist the learned engine budget (docs/14)
         # Two distinct signals: edge_t median (N-INDEPENDENT — is generation finding more raw edge?
         # rising ⇒ learning, flat ⇒ space exhausted) and dsr_z best (N-aware — how close the single
         # closest genome is to actually clearing G4 right now).

@@ -190,7 +190,7 @@ def run_system(markets, generations: int, batch_size: int, seed: int, structure:
 _MIN_GENS_FOR_TREND = 8
 
 
-def _convergence(z_trend: list) -> dict:
+def _convergence(z_trend: list, best_z_floor: float = None) -> dict:
     """Steering verdict — WHICH wall are we on? Two signals, and the DISTINCTION matters:
 
       • best-z (the DISCOVERY signal): how close the single best genome is to clearing G4. This is
@@ -199,15 +199,26 @@ def _convergence(z_trend: list) -> dict:
         genomes are random/exploratory, so this sits near zero *by construction* on an efficient
         market — it is NOT a quality score, and a few noisy points must not be read as a trend.
 
+    `best_z_floor` is the ALL-TIME hall-of-fame high-water mark (docs/14). The per-run z_trend
+    resets every marathon, so on its own best-z spuriously "regresses" when a short/cold run hasn't
+    re-climbed yet; flooring the headline best-z with the persisted best makes it a true
+    cross-marathon progress metric that ratchets and never drops. `this_run_best_z` keeps the raw
+    within-run climb visible alongside it.
+
     So the verdict needs ≥8 generations and a noise-aware dead-band; below that we refuse to call
     it. The median is judged by a least-squares slope vs its own scatter, never a 2-point delta."""
     pts = [(t["gen"], t["edge_t_median"]) for t in z_trend if t.get("edge_t_median") is not None]
-    best_z = max((t["z_best"] for t in z_trend if t.get("z_best") is not None), default=None)
+    run_best_z = max((t["z_best"] for t in z_trend if t.get("z_best") is not None), default=None)
+    # headline best-z = max(this run's climb, all-time hall-of-fame high-water mark)
+    if best_z_floor is not None:
+        best_z = best_z_floor if run_best_z is None else max(run_best_z, float(best_z_floor))
+    else:
+        best_z = run_best_z
     # is the BEST improving? compare the best-z of the recent half vs the early half
     zb = [t["z_best"] for t in z_trend if t.get("z_best") is not None]
     best_recent = max(zb[len(zb) // 2:], default=None) if zb else None
     best_early = max(zb[:len(zb) // 2], default=None) if len(zb) > 1 else None
-    out = {"trend": z_trend, "dsr_z_best": best_z,
+    out = {"trend": z_trend, "dsr_z_best": best_z, "this_run_best_z": run_best_z,
            "dsr_gap_to_significance": None if best_z is None else round(1.645 - best_z, 3),
            "best_z_recent": best_recent, "best_z_early": best_early}
     if len(pts) < _MIN_GENS_FOR_TREND:
