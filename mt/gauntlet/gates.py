@@ -84,11 +84,19 @@ def g4_deflated_sharpe(net: pd.Series, trial_count: int, ann_factor: float = 365
     if "error" in dsr:
         return GateResult("G4_deflated_sharpe", "fail", dsr, dsr["error"])
     raw = float(dsr.get("raw_sharpe", 0.0)); pval = dsr.get("dsr_pvalue"); sig = bool(dsr.get("is_significant", False))
+    reliable = bool(dsr.get("reliable", True))
     passed = sig and raw > 0 and (pval is not None and pval < DSR_PVALUE_MAX)
-    reason = "" if passed else f"raw_sharpe={raw:.2f}, dsr_p={pval}, trials={trial_count} — not significant"
+    if not reliable:                                    # cold ledger: no cross-trial σ_SR at non-trivial N
+        reason = (f"deflation not trustworthy — no ledger σ_SR yet at N={trial_count} "
+                  f"(fail-closed until the trial ledger warms up)")
+    elif not passed:
+        reason = f"raw_sharpe={raw:.2f}, dsr_p={pval}, trials={trial_count} — not significant"
+    else:
+        reason = ""
     return GateResult("G4_deflated_sharpe", "pass" if passed else "fail",
                       {"raw_sharpe": raw, "dsr_pvalue": pval, "dsr_z": dsr.get("dsr_z_score"),
                        "expected_max_sr": dsr.get("expected_max_sr"), "is_significant": sig,
+                       "reliable": reliable, "sigma_sr_source": dsr.get("sigma_sr_source"),
                        "trial_count": trial_count, "engine": dsr.get("engine")}, reason)
 
 

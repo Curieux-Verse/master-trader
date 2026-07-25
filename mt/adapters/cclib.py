@@ -153,6 +153,13 @@ except Exception:  # pragma: no cover
     cc_compute_deflated_sharpe = None
 
 
+# Below this family size the E[max SR] deflation is modest, so the null-dispersion fallback
+# (σ_SR ≈ sr_se) is safe. At or above it, an honest cross-trial σ_SR (from the ledger) is required
+# — without one, the fallback under-deflates for autocorrelated/structured returns and would
+# false-admit a best-of-N selection overfit, so G4 fails closed (docs/14 cold-ledger hardening).
+DSR_RELIABLE_N_MAX = 5
+
+
 def deflated_sharpe(returns: List[float], n_trials: int, annualization_factor: float = 365.0,
                     sr_trial_std: float = None) -> dict:
     """Correct Deflated Sharpe — the multiple-testing firewall (docs/05 G4).
@@ -161,6 +168,11 @@ def deflated_sharpe(returns: List[float], n_trials: int, annualization_factor: f
     per-observation Sharpes across those trials (the ledger's dispersion) — the σ_SR that
     scales the deflation threshold. A candidate is significant iff its Sharpe clears the
     expected maximum Sharpe of N lucky trials.
+
+    When `sr_trial_std` is missing (a cold ledger) the deflation is only trustworthy for a small
+    family (N ≤ DSR_RELIABLE_N_MAX); beyond that the result is flagged `reliable=False` and
+    `is_significant` is forced False — the caller must not admit or high-water-mark it until the
+    ledger warms up (Bailey & López de Prado: record all trials AND their dispersion).
     """
     from scipy.stats import norm, skew, kurtosis
     r = np.asarray([float(x) for x in returns if np.isfinite(x)], dtype=float)
@@ -173,7 +185,8 @@ def deflated_sharpe(returns: List[float], n_trials: int, annualization_factor: f
     sr = mu / sigma                                   # per-observation Sharpe
     s = float(skew(r)); ek = float(kurtosis(r, fisher=True)); g4 = ek + 3.0
     sr_se = float(np.sqrt(max(1e-12, (1.0 - s * sr + ((g4 - 1.0) / 4.0) * sr ** 2) / (T - 1))))
-    sigma_sr = float(sr_trial_std) if (sr_trial_std and sr_trial_std > 0) else sr_se
+    have_ledger_sigma = bool(sr_trial_std and sr_trial_std > 0)
+    sigma_sr = float(sr_trial_std) if have_ledger_sigma else sr_se
 
     N = max(1, int(n_trials))
     if N > 1:                                          # Bailey & López de Prado E[max SR]
@@ -188,11 +201,14 @@ def deflated_sharpe(returns: List[float], n_trials: int, annualization_factor: f
     dsr = float(norm.cdf(z))
     dsr_pvalue = float(1.0 - dsr)                      # probability the edge is a multiple-testing artifact
     haircut = float(max(0.0, (e_max / abs(sr) - 1.0)) * 100.0) if abs(sr) > 1e-10 else 0.0
+    reliable = bool(have_ledger_sigma or N <= DSR_RELIABLE_N_MAX)
     return {
         "n_returns": int(T), "raw_sharpe": round(sr, 5),
         "sr_annualized": round(sr * float(np.sqrt(min(T, annualization_factor))), 5),
         "skewness": round(s, 5), "excess_kurtosis": round(ek, 5), "sr_std_error": round(sr_se, 6),
-        "sigma_sr": round(sigma_sr, 6), "n_trials": N, "expected_max_sr": round(e_max, 5),
+        "sigma_sr": round(sigma_sr, 6), "sigma_sr_source": "ledger" if have_ledger_sigma else "fallback",
+        "n_trials": N, "expected_max_sr": round(e_max, 5), "reliable": reliable,
         "deflated_sharpe": round(dsr, 5), "dsr_z_score": round(z, 5), "dsr_pvalue": round(dsr_pvalue, 5),
-        "is_significant": bool(dsr_pvalue < 0.05), "haircut_pct": round(haircut, 2), "engine": "mt_dsr",
+        "is_significant": bool(dsr_pvalue < 0.05 and reliable), "haircut_pct": round(haircut, 2),
+        "engine": "mt_dsr",
     }

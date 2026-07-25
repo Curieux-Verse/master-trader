@@ -88,7 +88,10 @@ class DiscoveryLoop:
             for g in self._generate(engine, cnt):
                 produced.append((g, engine))
 
-        sr_std = self.store.sr_trial_std(self.market)
+        # cross-trial σ_SR for the DSR deflation: per-market, but borrow the GLOBAL ledger dispersion
+        # when this market is still cold (< 8 finite trials) so a sparse market isn't deflated with the
+        # weak per-candidate fallback. If even the global ledger is cold, G4 fails closed (docs/14).
+        sr_std = self.store.sr_trial_std(self.market) or self.store.sr_trial_std(None)
         rho = self.store.avg_trial_corr(self.market)         # P&L co-movement → effective trial count
         ctx = GauntletContext(eval_fn=lambda g, p: evaluate(g, p, self.seed), panel=self.panel,
                               holdout_panel=self.holdout, archive_returns=self.archive_returns,
@@ -131,8 +134,12 @@ class DiscoveryLoop:
                 if out["suggested_mutation"] is not None and len(self.pending_mutations) < 24:
                     self.pending_mutations.append(out["suggested_mutation"])
 
-            z = (report.gates.get("G4_deflated_sharpe", {}) or {}).get("dsr_z")
-            if z is not None and np.isfinite(z):
+            g4stats = report.gates.get("G4_deflated_sharpe", {}) or {}
+            z = g4stats.get("dsr_z")
+            # only trust the DSR z when the deflation is reliable (a warm ledger σ_SR, or a tiny
+            # family): a cold-ledger, under-deflated z must NOT enter best-z / the hall-of-fame, or it
+            # would inflate the all-time high-water mark permanently (docs/14 cold-ledger hardening).
+            if z is not None and np.isfinite(z) and g4stats.get("reliable", True):
                 dsr_z.append(float(z))
                 # persist the best-ever high-water mark (independent of the pass bar) so best-z
                 # ratchets across marathons and warm-start has elites to breed from (docs/14).
