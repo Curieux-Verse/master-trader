@@ -11,4 +11,10 @@ venv/
 .ipynb_checkpoints/
 # Reference books / large binaries — kept local, never published (copyright + repo bloat)
 *.pdf
+# Secrets — API keys / tokens live in repo secrets or a local .env, NEVER in the tree (public repo)
+.env*
+*API_KEY*.txt
+*_API_KEY*
+*.key
+*.pem
 # Parquet lake + run artifacts live under var/ (git-ignored); registries are reproducible from seed+snapshot
