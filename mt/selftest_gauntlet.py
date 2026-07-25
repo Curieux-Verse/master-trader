@@ -173,6 +173,22 @@ def experiment_directional_cpcv() -> dict:
             "time_aligned": bool(row0_ok and row1_ok), "pbo_runs": pbo is not None}
 
 
+def experiment_gate_robustness() -> dict:
+    """Degenerate & ruinous return series must not slip through (docs/14 gate review). A (near-)
+    constant series has a float-noise std → an astronomical spurious Sharpe that must be rejected at
+    G1 (else it passes G4b/G4); a bootstrap path with a ≤−100% bar must yield a drawdown in [0,1],
+    not NaN or >1. Regression guard so these robustness fixes can't silently rot."""
+    from mt.gauntlet import gates as G
+    from mt.adapters.cclib import bootstrap_drawdown
+    const_reject = G.g1_sanity(pd.Series(np.full(200, 0.001))).status == "fail"
+    near_reject = G.g1_sanity(pd.Series(0.001 + np.random.default_rng(0).normal(0, 1e-9, 200))).status == "fail"
+    ruin = np.r_[np.random.default_rng(1).normal(0.001, 0.02, 150), [-1.5, -1.0],
+                 np.random.default_rng(2).normal(0.001, 0.02, 48)]
+    dd = bootstrap_drawdown(ruin.tolist(), n_sims=400, seed=1).get("max_dd_95")
+    dd_ok = dd is not None and np.isfinite(dd) and 0.0 <= dd <= 1.0
+    return {"const_reject": const_reject, "near_reject": near_reject, "ruin_dd": dd, "dd_ok": dd_ok}
+
+
 def run(verbose: bool = True) -> dict:
     try:                                        # Windows consoles default to cp1252; the report has ✓/✗
         import sys
@@ -183,11 +199,13 @@ def run(verbose: bool = True) -> dict:
     b = experiment_real_edge()
     c = experiment_effective_n()
     d = experiment_directional_cpcv()
+    e = experiment_gate_robustness()
     trap_ok = not a["passed"]                       # the overfit winner MUST be rejected
     edge_ok = bool(b["g4_significant"])             # the real edge MUST clear significance
     # correlated trials collapse (N_eff ≪ raw) AND diverse trials do not
     neff_ok = (c["dup_neff"] <= max(3, c["dup_raw"] // 3)) and (c["div_neff"] >= c["div_raw"] // 2)
     dir_ok = bool(d["time_aligned"] and d["pbo_runs"])   # directional CPCV aligns by TIME, not position
+    robust_ok = bool(e["const_reject"] and e["near_reject"] and e["dd_ok"])  # degenerate/ruin can't slip
     if verbose:
         print("=" * 72)
         print(" GAUNTLET SELF-TEST — the critical go/no-go (docs/09 P2)")
@@ -205,16 +223,18 @@ def run(verbose: bool = True) -> dict:
         print(f"    -> {'PASS ✓ (correlated trials collapse, diverse ones do not)' if neff_ok else 'FAIL ✗'}")
         print(f"\n(D) Directional CPCV alignment: 3 variants trading on different bars → matrix {d['matrix_shape']}")
         print(f"    -> {'PASS ✓ (aligned by TIME on the union calendar, flat bars = 0)' if dir_ok else 'FAIL ✗ (position-aligned / misaligned)'}")
-        ok = trap_ok and edge_ok and neff_ok and dir_ok
+        print(f"\n(E) Gate robustness: (near-)constant series rejected, ruin drawdown={e['ruin_dd']}")
+        print(f"    -> {'PASS ✓ (degenerate Sharpe rejected at G1; DD stays in [0,1])' if robust_ok else 'FAIL ✗ (degenerate/ruin slipped through)'}")
+        ok = trap_ok and edge_ok and neff_ok and dir_ok and robust_ok
         verdict = "TRUSTWORTHY" if ok else "NOT TRUSTWORTHY — DO NOT PROCEED"
         print("\n" + "=" * 72)
         print(f" RESULT: gauntlet is {verdict}")
         print("=" * 72)
     return {"trap_ok": trap_ok, "edge_ok": edge_ok, "neff_ok": neff_ok, "dir_ok": dir_ok,
-            "overfit": a, "edge": b, "neff": c, "directional": d}
+            "robust_ok": robust_ok, "overfit": a, "edge": b, "neff": c, "directional": d, "robustness": e}
 
 
 if __name__ == "__main__":
     import sys
     r = run()
-    sys.exit(0 if (r["trap_ok"] and r["edge_ok"] and r["neff_ok"] and r["dir_ok"]) else 1)
+    sys.exit(0 if all(r[k] for k in ("trap_ok", "edge_ok", "neff_ok", "dir_ok", "robust_ok")) else 1)

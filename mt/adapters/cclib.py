@@ -22,6 +22,13 @@ _root = str(LIBRARY_ROOT)
 if LIBRARY_ROOT.exists() and _root not in sys.path:
     sys.path.append(_root)   # append (not insert) — never shadow mt's own imports
 
+# A per-observation Sharpe this large is not a strategy — it is a (near-)constant return series
+# whose std is floating-point noise, not zero (e.g. std≈2e-19 for a literal constant), so the
+# `std==0` / `sigma<1e-12` guards miss it and it reports an astronomical, spurious "significance".
+# Real per-bar Sharpes are ≲0.5; even a legendary one is <1. 50 is ~100× the strongest test edge,
+# so this can never reject a real strategy — it only rejects numerical degeneracy (docs/14 review).
+MAX_SANE_SR_PP = 50.0
+
 # ─── cost model ──────────────────────────────────────────────────────────
 try:
     from backtest.costs import round_trip_cost as _round_trip_cost  # type: ignore
@@ -90,9 +97,16 @@ def bootstrap_drawdown(returns: List[float], n_sims: int = 5000, seed: int = 42)
     block = _opt_block(r)
     # compounded equity per bootstrap path → FRACTIONAL drawdown (peak-to-trough / peak), the
     # same definition the executor summary reports; cumsum of simple returns understates DD.
-    equity = np.cumprod(1.0 + r[_sb_indices(len(r), block, n_sims, rng)], axis=1)
+    # A single-bar return ≤ −100% is RUIN: floor per-bar growth at 0 so equity can't go negative
+    # (which otherwise makes (peak−equity)/peak produce NaN at r=−1 or values >1 at r<−1). Once
+    # equity hits 0 it stays 0 → drawdown is 100%. Result is always in [0,1]; benign (no-ruin) paths
+    # are unchanged since the clamp is then a no-op (this keeps the 0.60 gate threshold calibrated).
+    growth = np.maximum(1.0 + r[_sb_indices(len(r), block, n_sims, rng)], 0.0)
+    equity = np.cumprod(growth, axis=1)
     running_max = np.maximum.accumulate(equity, axis=1)
-    max_dd = np.max((running_max - equity) / running_max, axis=1)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        dd = np.where(running_max > 0, (running_max - equity) / running_max, 1.0)
+    max_dd = np.max(dd, axis=1)
     thr = float(np.percentile(max_dd, 95))
     tail = max_dd[max_dd >= thr]
     return {
@@ -116,6 +130,8 @@ def reality_check(returns: List[float], n_trials: int = 1, n_sims: int = 2000, s
     if T < 10 or r.std(ddof=1) == 0:
         return {"error": "too_few_returns", "n": int(T)}
     sr = float(r.mean() / r.std(ddof=1))
+    if not np.isfinite(sr) or abs(sr) > MAX_SANE_SR_PP:   # near-constant series → spurious huge Sharpe
+        return {"error": "degenerate_sharpe", "n": int(T), "raw_sharpe": round(sr, 5)}
     rng = np.random.default_rng(seed)
     block = _opt_block(r)
     idx = _sb_indices(T, block, n_sims, rng)
@@ -183,6 +199,8 @@ def deflated_sharpe(returns: List[float], n_trials: int, annualization_factor: f
     if sigma < 1e-12:
         return {"error": "zero_variance"}
     sr = mu / sigma                                   # per-observation Sharpe
+    if not np.isfinite(sr) or abs(sr) > MAX_SANE_SR_PP:   # near-constant series (std≈float noise) →
+        return {"error": "degenerate_sharpe", "n": int(T)}   # spurious huge Sharpe; not a real edge
     s = float(skew(r)); ek = float(kurtosis(r, fisher=True)); g4 = ek + 3.0
     sr_se = float(np.sqrt(max(1e-12, (1.0 - s * sr + ((g4 - 1.0) / 4.0) * sr ** 2) / (T - 1))))
     have_ledger_sigma = bool(sr_trial_std and sr_trial_std > 0)

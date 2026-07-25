@@ -85,6 +85,17 @@ A full audit of the overfitting immune system (all 9 gates + the DSR / Reality-C
   - **Cold-ledger hardening (shipped).** The residual transient window — a fresh brain / sparse market with no cross-trial σ_SR yet, whose N can still be inflated by screening trials — is now closed three ways: (1) a cold market **borrows the global ledger σ_SR** (`sr_trial_std(market) or sr_trial_std(None)`); (2) if σ_SR is still unavailable and the family is non-trivial (**N > `DSR_RELIABLE_N_MAX`=5**), `deflated_sharpe` flags `reliable=False` and G4 **fails closed** (`is_significant`→False) — small families (N≤5, e.g. the real-edge control) still use the fallback safely; (3) an unreliable, under-deflated z is **kept out of best-z and the hall-of-fame** so it can never inflate the persistent all-time high-water mark. Proven: cold N=40 → fail-closed, warm σ_SR → honest, cold N=3 → still admits real edges; self-test TRUSTWORTHY.
 - **F3 — no gate short-circuit (performance).** The runner eagerly ran all 9 gates for every genome (G3 = m extra backtests, G6 = a holdout backtest) despite the "cheap→expensive" docstring. **Fix:** thunk the gates and stop at the first enforced failure — admission is unchanged; the expensive rungs now only run for survivors.
 
+### Second pass — robustness of the remaining gates (G1, G2, G4b, G5, G6, G7, G8)
+
+An adversarial stress of every remaining gate + its supporting math (bootstrap, Reality-Check, cost, block-bootstrap fallbacks) with pathological inputs (empty / all-zero / all-negative / single-spike / NaN-laden / near-constant / heavy-tailed / ruinous). No crashes (G7 handles directional duplicate-timestamp turnover fine). Four issues fixed:
+
+- **B1 (real) — a (near-)constant return series reported an astronomical spurious Sharpe.** `np.full(200, 0.001).std(ddof=1)` is ≈2e-19 (float noise, not 0), so the Sharpe is ≈4.6e15; it passed **G1** (`isfinite` only) and **G4b** (`std==0` only), and a near-constant band (std ~1e-9) even passed **G4** (`sr_se` scales with `sr`, pinning the t-stat at ≈√(2T)). **Fix:** a shared plausibility cap `MAX_SANE_SR_PP=50` (≈100× the strongest test edge; no real per-bar Sharpe approaches it) — G1, G4b, and `deflated_sharpe` now reject a per-observation Sharpe beyond it as degenerate.
+- **B2 (real) — G5 drawdown broke on ruin.** `cumprod(1+r)` with a bar ≤ −100% drove equity non-positive → `(peak−equity)/peak` gave **NaN** (at r=−1) or **>1** (at r<−1); reachable under leveraged sizing. **Fix:** floor per-bar growth at 0 (ruin ⇒ equity 0) and guard the division → drawdown is always in **[0,1]**, ruin = 1.0. Benign (no-ruin) paths are byte-identical, so the 0.60 gate threshold stays calibrated.
+- **B3 (minor) — G8 read a NaN correlation as orthogonal** (`max_corr=0`), so a NaN-laden duplicate evaded the dedup gate. **Fix:** correlate the finite pairwise overlap.
+- **B4 (minor) — G7's 2× cost stress dropped crypto funding** (`funding_rate=None`, 14 vs 19 bps). **Fix:** include a representative funding charge for perp markets.
+
+Locked in by a new self-test experiment **(E) gate robustness** — a (near-)constant series must be rejected at G1 and a ruin path's drawdown must stay in [0,1]. Self-test go/no-go is now A trap · B edge · C effective-N · D directional-CPCV · E robustness.
+
 ## References
 
 - D. H. Bailey & M. López de Prado, *The Deflated Sharpe Ratio: Correcting for Selection Bias, Backtest Overfitting, and Non-Normality*, J. Portfolio Management (2014). SSRN 2460551.

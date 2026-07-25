@@ -13,7 +13,8 @@ from typing import Dict, Optional
 import numpy as np
 import pandas as pd
 
-from mt.adapters.cclib import deflated_sharpe, bootstrap_drawdown, round_trip_cost_bps, reality_check
+from mt.adapters.cclib import (deflated_sharpe, bootstrap_drawdown, round_trip_cost_bps,
+                               reality_check, MAX_SANE_SR_PP)
 from mt.config import MARKETS
 from mt.gauntlet import cpcv
 
@@ -57,9 +58,15 @@ def g1_sanity(net: pd.Series) -> GateResult:
     if share > MAX_SINGLE_PERIOD_SHARE:
         return GateResult("G1_sanity", "fail", {"single_period_share": share},
                           f"one period is {share:.0%} of gross P&L")
-    if not np.isfinite(_sharpe(net.to_numpy())):
-        return GateResult("G1_sanity", "fail", {}, "degenerate return series")
-    return GateResult("G1_sanity", "pass", {"n_periods": n, "single_period_share": round(share, 3)})
+    srpp = _sharpe(net.to_numpy())
+    # a non-finite OR implausibly huge per-bar Sharpe means near-zero variance — a (near-)constant
+    # series whose std is float noise, not a real edge (its huge Sharpe would else pass G4b / G4).
+    if not np.isfinite(srpp) or abs(srpp) > MAX_SANE_SR_PP:
+        return GateResult("G1_sanity", "fail",
+                          {"sharpe_pp": None if not np.isfinite(srpp) else round(srpp, 3)},
+                          "degenerate return series (near-zero variance / implausible Sharpe)")
+    return GateResult("G1_sanity", "pass",
+                      {"n_periods": n, "single_period_share": round(share, 3), "sharpe_pp": round(srpp, 3)})
 
 
 # ── G2 in-sample / out-of-sample degradation (cheap) ───────────────────────
@@ -129,9 +136,12 @@ def g5_robustness(net: pd.Series, seed: int = 42) -> GateResult:
 # ── G7 capacity / cost stress (2× costs, cheap linear model) ───────────────
 def g7_capacity(genome, res, ctx) -> GateResult:
     mkt = MARKETS.get(genome.meta.market)
+    # include a representative funding charge for perp markets so the 2× cost stress doesn't
+    # silently understate round-trip cost for crypto (funding is a real, recurring leg).
+    fr = 0.0001 if (mkt and mkt.has_funding) else None
     cost_per = round_trip_cost_bps(half_spread_bps=(mkt.half_spread_bps if mkt else 2.0),
                                    fee_bps_per_side=(mkt.fee_bps_per_side if mkt else 5.0),
-                                   funding_rate=None) / 1e4
+                                   funding_rate=fr) / 1e4
     net = res.net_returns
     turn = res.turnover.reindex(net.index).fillna(0.0) if len(res.turnover) else pd.Series(1.0, index=net.index)
     net_2x = net - turn * cost_per                      # charge one extra round trip ⇒ 2× friction
@@ -155,6 +165,10 @@ def g8_orthogonality(res, ctx) -> GateResult:
         if m < 20:
             continue
         a, b = r[-m:], o[-m:]
+        mask = np.isfinite(a) & np.isfinite(b)          # correlate the finite overlap, don't skip on a
+        if mask.sum() < 20:                              # single NaN (which would silently read as orthogonal)
+            continue
+        a, b = a[mask], b[mask]
         if a.std() == 0 or b.std() == 0:
             continue
         c = abs(float(np.corrcoef(a, b)[0, 1]))
