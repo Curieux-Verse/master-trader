@@ -141,22 +141,29 @@ def run_system(markets, generations: int, batch_size: int, seed: int, structure:
 
     # ── archive snapshot ──
     elites_rows = store.archive_rows()
-    archive = {"coverage": len(elites_rows),
-               "elites": [{"niche": r["niche_key"], "fit": r["scalar_fit"], "market": r["market"]}
-                          for r in elites_rows]}
+    archive = {"coverage": len(elites_rows), "qd_score": round(store.qd_score(), 4),
+               "cleared": len(store.archive_rows(cleared_only=True)),
+               "elites": [{"niche": r["niche_key"], "fit": r["scalar_fit"], "market": r["market"],
+                           "cleared": bool(r["cleared"])} for r in elites_rows]}
 
     # ── OUTER LOOP: promote elites → paper/shadow per market ──
     print(f"\n{'─'*72}\n OUTER LOOP — promote archive → paper/shadow (R1, no capital)\n{'─'*72}")
     paper_agg = {"days": paper_days, "events": [], "n_strategies": 0, "tracked": 0, "book_sharpes": []}
     for m in markets:
-        rows = [r for r in elites_rows if r["market"] == m]
+        # ONLY Stage-B–confirmed members are eligible for paper. The archive now admits by
+        # behavioural niche (canonical MAP-Elites), so membership means "worth remembering", NOT
+        # "worth trading" — papering a merely-promoted candidate would quietly undo the whole
+        # point of separating exploration from confirmation (docs/15 §4).
+        rows = [r for r in elites_rows if r["market"] == m and r["cleared"]]
         elites = []
         for r in rows:
             g = store.get_genome(r["genome_id"])
             if g is not None:
                 elites.append((g, store.genome_sharpe_pp(r["genome_id"])))
         if not elites:
-            print(f"  [{m}] no archive elites to paper-trade (honest: nothing cleared the gauntlet).")
+            n_prom = sum(1 for r in elites_rows if r["market"] == m and r["promoted"])
+            print(f"  [{m}] no CONFIRMED elites to paper-trade "
+                  f"({n_prom} promoted candidates awaiting Stage-B confirmation).")
             continue
         book = PaperBook(m, elites, seed=seed)
         pr = book.run(live_panels[m], n_days=paper_days)

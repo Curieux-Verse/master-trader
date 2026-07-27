@@ -29,14 +29,36 @@ from mt.run_system import _build_panels, _convergence, _pretty_lessons
 from mt.live.report import format_system_report, format_telegram_report, send_telegram
 
 
+def _confirmations(store, loops):
+    """STAGE B — the only place the sealed holdout is read (docs/15 §4).
+
+    Replaces the old per-digest champion re-validation, which evaluated the top hall-of-fame
+    genome on the holdout every single digest with no budget and no written-down hypothesis. That
+    is a selection surface, not an out-of-sample test. Here the finalist list is pre-registered
+    (content-hashed + timestamped) BEFORE the panel is touched, every access is counted, and the
+    Deflated Sharpe is charged the finalist family size — small precisely because it was paid for
+    with fresh data, not by relabelling the exploratory ledger."""
+    from mt.improve.confirm import confirm
+    out = []
+    for m, loop in loops.items():
+        holdout = getattr(loop, "holdout", None)
+        if holdout is None:
+            continue
+        try:
+            r = confirm(store, m, holdout, seed=loop.seed)
+        except Exception as e:
+            print(f"  [{m}] confirmation skipped: {e}")
+            continue
+        if r:
+            out.append(r)
+    return out
+
+
 def _champions(store, loops):
-    """Champion/challenger certification (docs/14): the standing champion per market is the top
-    hall-of-fame genome. Re-validate it on the UNSEEN holdout each digest — an out-of-sample check
-    that a genome is not just an in-sample high — and track its reign (how many consecutive digests
-    it has held). The OOS re-eval is NOT written to the result ledger, so the honest Deflated-Sharpe
-    trial count is untouched (re-testing a known champion is not a new hypothesis). This is how the
-    'best strategy' is certified over weeks — by surviving repeated OOS challenges, not one run's z."""
-    from mt.adapters.cclib import deflated_sharpe
+    """The standing champion per market, reported from ALREADY-PAID evidence.
+
+    Reads the last recorded Stage-B result rather than re-running the holdout, so reporting the
+    champion costs zero additional holdout accesses. Reign = consecutive digests held."""
     out = []
     for m, loop in loops.items():
         rows = store.hof_top(m, limit=1)
@@ -45,25 +67,33 @@ def _champions(store, loops):
         r = rows[0]; gid = r["genome_id"]; g = store.get_genome(gid)
         if g is None:
             continue
-        oos_sharpe = oos_z = None
-        holdout = getattr(loop, "holdout", None)
-        if holdout is not None:
-            try:
-                res = evaluate(g, holdout, loop.seed)          # unseen data; deliberately NOT ledgered
-                if res.ok:
-                    oos_sharpe = res.summary.get("net_sharpe")
-                    rho = store.avg_trial_corr(m)
-                    n_eff = store.effective_trial_count(m, rho)
-                    d = deflated_sharpe(res.net_returns.tolist(), n_trials=max(1, n_eff),
-                                        sr_trial_std=store.sr_trial_std(m))
-                    oos_z = d.get("dsr_z_score")
-            except Exception:
-                pass
+        prior = store.conn.execute(
+            "SELECT oos_sharpe, oos_dsr_z FROM champion_track WHERE market=? AND genome_id=? "
+            "ORDER BY created_at DESC LIMIT 1", (m, gid)).fetchone()
+        oos_sharpe = prior["oos_sharpe"] if prior else None
+        oos_z = prior["oos_dsr_z"] if prior else None
         reign = store.champion_reign(m, gid) + 1
         store.record_champion(m, gid, r["dsr_z"], oos_sharpe, oos_z, reign)
+        arch = [a for a in store.archive_rows(m) if a["genome_id"] == gid]
         out.append({"market": m, "genome_id": gid, "dsr_z": r["dsr_z"], "prose": g.to_prose()[:90],
                     "oos_sharpe": oos_sharpe, "oos_dsr_z": oos_z, "reign": reign,
-                    "cleared": bool(r["passed"])})
+                    "cleared": bool(arch and arch[0]["cleared"])})
+    return out
+
+
+def _books(store, loops):
+    """Portfolio-level significance per market (docs/15 §5) — the object that can realistically
+    clear the bar when no single genome does."""
+    out = []
+    for m, loop in loops.items():
+        try:
+            b = loop.build_book()
+        except Exception:
+            continue
+        if not b:
+            continue
+        store.record_book(m, b["members"], b["book_sharpe_pp"], b["book_dsr_z"], None, None)
+        out.append({"market": m, **{k: v for k, v in b.items() if k != "returns"}})
     return out
 
 
@@ -130,15 +160,17 @@ def run(markets, generations, batch_size, seed, source, snapshot_id, structure,
                     gen_zbest.append(st["dsr_z_best"])
             z_trend.append({"gen": gen, "edge_t_median": (float(np.median(gen_e)) if gen_e else None),
                             "z_best": (max(gen_zbest) if gen_zbest else None)})
-            arch = sum(loops[m].archive.coverage() for m in markets)
+            arch = sum(loops[m].archive.coverage(m) for m in markets)
             admitted = store.conn.execute("SELECT COUNT(*) FROM gauntlet_reports WHERE passed=1").fetchone()[0]
             if gen % report_every == 0 or (generations > 0 and gen == generations):
                 _digest(store, markets, z_trend, fam_all, pheno_all, gen, arch, admitted, t0,
                         bandit=loops[markets[0]].bandit.weights(), loops=loops)
             else:
                 et = z_trend[-1]["edge_t_median"]; zb = z_trend[-1]["z_best"]
-                print(f"  gen {gen:4}: archive={arch:3} admitted={admitted:3} N={store.trial_count():6} "
-                      f"lessons={store.lesson_count():3}  edge-t̃={_f(et)}  best-z={_f(zb)}")
+                qd = store.qd_score()
+                print(f"  gen {gen:4}: niches={arch:3} promoted={admitted:4} QD={qd:+7.2f} "
+                      f"N={store.trial_count():6} lessons={store.lesson_count():3}  "
+                      f"edge-t̃={_f(et)}  best-z={_f(zb)}")
     except KeyboardInterrupt:
         print("\n  ⏹  interrupted — writing final report…")
 
@@ -157,19 +189,29 @@ def _digest(store, markets, z_trend, fam_all, pheno_all, gen, arch, admitted, t0
     passed = sum(c for p, c in gr if p); rejected = sum(c for p, c in gr if not p)
     rho = store.avg_trial_corr()
     bz_all = store.best_z_alltime()          # persisted all-time high-water mark → best-z ratchets
+    keff = store.effective_trials(None, rho)
+    confirmations = _confirmations(store, loops) if (loops and final) else []
     rep = {
         "started": datetime.now(timezone.utc).isoformat(),
         "elapsed_s": round(time.time() - t0, 1), "markets": markets,
         "discovery": {"generations": gen, "evaluated": store.trial_count(),
-                      "admitted": passed, "rejected": rejected,
+                      "promoted": passed, "rejected": rejected,
+                      "admitted": passed,          # legacy key, kept for old report readers
                       "reject_rate": rejected / max(1, passed + rejected),
                       "n_families": len(fam_all), "phenotypes": dict(pheno_all),
                       "trial_corr": None if rho is None else round(rho, 4),
-                      "effective_trials": store.effective_trial_count(None, rho),
+                      "effective_trials": int(keff["n_eff"]), "keff_method": keff["method"],
                       "bandit": {k: round(v, 3) for k, v in (bandit or {}).items()},
                       **_convergence(z_trend, best_z_floor=bz_all)},
-        "archive": {"coverage": arch, "elites": [{"niche": r["niche_key"], "fit": r["scalar_fit"],
-                    "market": r["market"]} for r in store.archive_rows()[:8]]},
+        "archive": {"coverage": arch, "qd_score": round(store.qd_score(), 4),
+                    "cleared": len(store.archive_rows(cleared_only=True)),
+                    "elites": [{"niche": r["niche_key"], "fit": r["scalar_fit"],
+                                "market": r["market"], "cleared": bool(r["cleared"])}
+                               for r in store.archive_rows()[:8]]},
+        "books": _books(store, loops) if loops else [],
+        "confirmations": confirmations,
+        "holdout": {"accesses": store.holdout_access_count(),
+                    "preregistrations": store.prereg_count()},
         "champions": _champions(store, loops) if loops else [],
         "paper": {}, "lessons": store.lesson_count(),
         "recent_lessons": _pretty_lessons(store.recent_lessons(4)),
