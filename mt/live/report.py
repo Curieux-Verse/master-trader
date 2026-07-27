@@ -39,7 +39,7 @@ def format_system_report(rep: Dict) -> str:
 
     champs = rep.get("champions", [])
     if champs:
-        L.append(f"\n▸ CHAMPIONS  (best-ever per market; re-validated OOS on the unseen holdout)")
+        L.append(f"\n▸ CHAMPIONS  (best-ever per market; OOS figures from the last Stage-B round)")
         for c in champs:
             oos = c.get("oos_sharpe"); ooz = c.get("oos_dsr_z")
             L.append(f"   [{c.get('market',''):6}] z={c.get('dsr_z',0):+.2f}  reign={c.get('reign',1)}  "
@@ -49,9 +49,38 @@ def format_system_report(rep: Dict) -> str:
             L.append(f"           {c.get('prose','')}")
 
     arch = rep.get("archive", {})
-    L.append(f"\n▸ ARCHIVE  ({arch.get('coverage', 0)} diverse niches)")
+    L.append(f"\n▸ ARCHIVE  ({arch.get('coverage', 0)} diverse niches · "
+             f"QD-score {arch.get('qd_score', 0):+.2f} · {arch.get('cleared', 0)} confirmed)")
     for e in arch.get("elites", [])[:8]:
-        L.append(f"   {e.get('niche',''):32} fit={e.get('fit',0):.3f}  [{e.get('market','')}]")
+        L.append(f"   {e.get('niche',''):32} fit={e.get('fit',0):.3f}  [{e.get('market','')}]"
+                 + ("  ✅confirmed" if e.get("cleared") else ""))
+
+    books = rep.get("books", [])
+    if books:
+        L.append(f"\n▸ BOOK  (portfolio of decorrelated candidates — the combination, not one genome)")
+        for b in books:
+            dz = b.get("book_dsr_z"); gain = b.get("diversification_gain")
+            L.append(f"   [{b.get('market',''):6}] {b.get('n_members',0)} members  "
+                     f"book-z={('—' if dz is None else f'{dz:+.2f}')}  "
+                     f"edge-t={b.get('book_edge_t')}  ρ̄={b.get('mean_member_corr')}  "
+                     f"vs best single ×{('—' if gain is None else gain)}")
+
+    conf = rep.get("confirmations", [])
+    hold = rep.get("holdout", {})
+    if conf or hold:
+        L.append(f"\n▸ STAGE B — CONFIRMATION  (pre-registered, on sealed holdout)")
+        for c in conf:
+            L.append(f"   [{c.get('market',''):6}] list {c.get('list_hash','')} · "
+                     f"{c.get('family_size',0)} finalists (N_eff={c.get('n_eff')}, {c.get('keff_method')}) "
+                     f"→ {c.get('n_cleared',0)} cleared")
+            bo = c.get("book_oos") or {}
+            if bo:
+                bz = bo.get("book_dsr_z")
+                L.append(f"           book OOS: {bo.get('n_members',0)} members  "
+                         f"z={('—' if bz is None else f'{bz:+.2f}')}  "
+                         f"sharpe={bo.get('book_sharpe_pp')}  (family={bo.get('n_books_tried')})")
+        L.append(f"   holdout budget     : {hold.get('accesses', 0)} accesses across "
+                 f"{hold.get('preregistrations', 0)} pre-registrations")
 
     paper = rep.get("paper", {})
     if paper:
@@ -114,12 +143,26 @@ def format_telegram_report(rep: Dict) -> str:
     L.append(f"<i>{html.escape(when)} · {len(mkts)} markets · {rep.get('elapsed_s', '?')}s</i>")
     L.append("")
 
-    if adm > 0:
-        L.append(f"🎉 <b>{adm} candidate{'s' if adm != 1 else ''} cleared the gauntlet!</b>")
+    confirmed = int(arch.get("cleared", 0) or 0)
+    if confirmed > 0:
+        L.append(f"🎉 <b>{confirmed} candidate{'s' if confirmed != 1 else ''} CONFIRMED</b> "
+                 f"<i>on sealed holdout</i>")
+    elif adm > 0:
+        L.append(f"🔎 <b>{adm} promoted</b> to the candidate pool <i>(Stage A — not yet confirmed)</i>")
     else:
-        L.append("🛡️ <b>Nothing cleared</b> — the machine held the line")
+        L.append("🛡️ <b>Nothing promoted</b> — the machine held the line")
         L.append("<i>honest: no genuine edge yet, not a bug</i>")
     L.append("")
+
+    books = rep.get("books", []) or []
+    if books:
+        b = max(books, key=lambda x: (x.get("book_dsr_z") if x.get("book_dsr_z") is not None else -99))
+        bz_book = b.get("book_dsr_z")
+        L.append(f"📚 <b>Book</b> · {b.get('n_members', 0)} decorrelated members "
+                 f"(ρ̄ {b.get('mean_member_corr')})")
+        L.append(f"book-z <b>{'—' if bz_book is None else f'{bz_book:+.2f}'}</b> · "
+                 f"×{b.get('diversification_gain', '—')} vs best single member")
+        L.append("")
 
     if bz is not None:
         this_run = disc.get("this_run_best_z")

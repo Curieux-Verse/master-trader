@@ -65,9 +65,50 @@ def mine_features(panel: NormPanel, n_candidates: int, rng: np.random.Generator,
     return scored[:top]
 
 
-def mint_interaction(panel: NormPanel, rng: np.random.Generator, min_ic: float = 0.03) -> Optional[str]:
+def register_minted(name: str, recipe: dict, ic: float = 0.0) -> bool:
+    """(Re)build a minted `intx_*` primitive from its stored recipe and register it.
+
+    Called at startup for every op in the `minted_ops` table. Without this the vocabulary lived
+    only in the process that minted it: on the next marathon the op was gone from the REGISTRY, so
+    every hall-of-fame genome built on it failed `typecheck` and was silently skipped by
+    warm-start — the deepest, most-evolved part of the search was discarded every run while
+    best-z still reported its score (docs/15 §3.4)."""
+    if name in REGISTRY:
+        return False
+    a, aa = recipe["a"], recipe["a_args"]
+    b, ab = recipe["b"], recipe["b_args"]
+
+    def _builder(p, args, tfx, _a=a, _aa=aa, _b=b, _ab=ab):
+        za_ = F.zscore_rows(F.compute(_a, p, _aa, tfx))
+        zb_ = F.zscore_rows(F.compute(_b, p, _ab, tfx))
+        return za_ * zb_
+
+    F.BUILDERS[name] = _builder
+    register(OpSpec(name, "feature", {}, output="Series[zscore]", cost_class="medium",
+                    tags=("mined", "interaction", a, b), computable=True,
+                    pit=Pit(lookback="max(components)"),
+                    provenance={"source": "factor_miner", "version": "1.0.0", "ic": round(ic, 4)},
+                    doc=f"mined interaction {a}×{b} (IC={ic:.3f})"))
+    return True
+
+
+def restore_minted(store) -> int:
+    """Rebuild the whole persisted vocabulary. Returns how many ops were re-registered."""
+    n = 0
+    for name, recipe, ic in store.minted_ops():
+        try:
+            if register_minted(name, recipe, ic or 0.0):
+                n += 1
+        except Exception:
+            continue
+    return n
+
+
+def mint_interaction(panel: NormPanel, rng: np.random.Generator, min_ic: float = 0.03,
+                     store=None, market: str = "") -> Optional[str]:
     """Mint a new `intx_*` primitive = product of two standardized features, if it clears an
-    IC bar. Registers it (typed, PIT-safe, bounded) so every generator can use it immediately."""
+    IC bar. Registers it (typed, PIT-safe, bounded) so every generator can use it immediately,
+    and PERSISTS the recipe so it survives the process."""
     fwd = _forward(panel)
     ops = [op for op in computable_feature_ops()
            if all(d in ("ohlcv", "funding_rate") for d in op.data_requires)]
@@ -87,16 +128,11 @@ def mint_interaction(panel: NormPanel, rng: np.random.Generator, min_ic: float =
     name = f"intx_{key}"
     if name in REGISTRY:
         return name
-
-    def _builder(p, args, tfx, _a=a.name, _aa=aa, _b=b.name, _ab=ab):
-        za_ = F.zscore_rows(F.compute(_a, p, _aa, tfx))
-        zb_ = F.zscore_rows(F.compute(_b, p, _ab, tfx))
-        return za_ * zb_
-
-    F.BUILDERS[name] = _builder
-    register(OpSpec(name, "feature", {}, output="Series[zscore]", cost_class="medium",
-                    tags=("mined", "interaction", a.name, b.name), computable=True,
-                    pit=Pit(lookback="max(components)"),
-                    provenance={"source": "factor_miner", "version": "1.0.0", "ic": round(ic, 4)},
-                    doc=f"mined interaction {a.name}×{b.name} (IC={ic:.3f})"))
+    recipe = {"a": a.name, "a_args": aa, "b": b.name, "b_args": ab}
+    register_minted(name, recipe, ic)
+    if store is not None:
+        try:
+            store.save_minted_op(name, market, recipe, ic)
+        except Exception:
+            pass
     return name

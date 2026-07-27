@@ -38,17 +38,36 @@ class MapElites:
         self.store = store
 
     def insert(self, genome: Genome, res: EvalResult, report: GauntletReport) -> InsertOutcome:
-        """Insert a gauntlet-passing genome into its behavioral niche."""
+        """Insert a genome into its behavioural niche, keeping the fitter incumbent.
+
+        Admission is by NICHE, per canonical MAP-Elites — each cell holds the highest-fitness
+        solution whose descriptor maps to it, with no global quality bar. The previous version
+        admitted only genomes that had cleared the whole gauntlet, which sounds conservative but
+        silently disabled quality-diversity entirely: nothing ever cleared, so the archive stayed
+        at 0 niches, which meant no elites to breed from, no return series for G8 to measure
+        against (0 of 400 verdicts computed a real correlation), and no empty cells to aim at.
+
+        The pass bar has NOT been relaxed — it moved to where it belongs. `report.cleared` records
+        whether a member survived confirmation, and only that flag makes a genome tradeable."""
         nk = niche_key(genome.meta.market, res.behavioral_descriptor)
         action = self.store.upsert_archive(
             niche_key=nk, genome_id=genome.genome_id, market=genome.meta.market,
             fitness=report.fitness, descriptor=res.behavioral_descriptor,
             scalar_fit=report.scalar_fitness,
+            promoted=report.promoted, cleared=report.cleared,
         )
         return InsertOutcome(niche=nk, action=action, scalar_fitness=report.scalar_fitness)
 
-    def coverage(self) -> int:
-        return len(self.store.archive_rows())
+    def coverage(self, market=None) -> int:
+        return len(self.store.archive_rows(market))
 
-    def elites(self) -> List:
-        return self.store.archive_rows()
+    def qd_score(self, market=None) -> float:
+        """Σ fitness over occupied niches — rises only on NEW behaviour or a better incumbent."""
+        return self.store.qd_score(market)
+
+    def elites(self, market=None) -> List:
+        return self.store.archive_rows(market)
+
+    def cleared_elites(self, market=None) -> List:
+        """Only members that survived Stage-B confirmation — the tradeable subset."""
+        return self.store.archive_rows(market, cleared_only=True)

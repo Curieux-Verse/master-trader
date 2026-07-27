@@ -23,7 +23,9 @@ MAX_SINGLE_PERIOD_SHARE = 0.50
 DSR_PVALUE_MAX = 0.05
 MAX_DD_95_CAP = 0.60
 PBO_MAX = 0.50
-MAX_ARCHIVE_CORR = 0.90
+MAX_ARCHIVE_CORR = 0.90       # above this the fitness discount starts biting
+CLONE_CORR = 0.99             # above this it is the same strategy — hard reject
+FDR_Q = 0.10                  # Stage-A false-discovery rate (docs/15 §4)
 
 
 @dataclass
@@ -32,6 +34,7 @@ class GateResult:
     status: str                  # "pass" | "fail" | "deferred"
     stats: Dict = field(default_factory=dict)
     reason: str = ""
+    advisory: bool = False       # measured and reported, but never rejects at this stage
 
     @property
     def passed(self) -> bool:
@@ -39,7 +42,10 @@ class GateResult:
 
     @property
     def enforced(self) -> bool:
-        return self.status in ("pass", "fail")
+        return (not self.advisory) and self.status in ("pass", "fail")
+
+    def as_advisory(self) -> "GateResult":
+        return GateResult(self.name, self.status, self.stats, self.reason, advisory=True)
 
 
 def _sharpe(x: np.ndarray) -> float:
@@ -105,6 +111,44 @@ def g4_deflated_sharpe(net: pd.Series, trial_count: int, ann_factor: float = 365
                        "expected_max_sr": dsr.get("expected_max_sr"), "is_significant": sig,
                        "reliable": reliable, "sigma_sr_source": dsr.get("sigma_sr_source"),
                        "trial_count": trial_count, "engine": dsr.get("engine")}, reason)
+
+
+# ── GS Stage-A screen: FDR-controlled, N-INDEPENDENT (docs/15 §4) ──────────
+def gs_screen(net: pd.Series, fdr_threshold: Optional[float], q: float = 0.10) -> GateResult:
+    """The EXPLORATORY bar. Admits a candidate to the pool when its single-strategy p-value clears
+    a Benjamini–Hochberg–Yekutieli threshold computed over the recent trial population.
+
+    Why this and not G4: the Deflated Sharpe is a max-statistic FWER control. Applied to every
+    exploratory candidate at a family size of every trial ever run, it is a confirmatory
+    instrument used as a screen — the setting the multiple-comparisons literature specifically
+    warns produces many missed discoveries. Worse for a *learning* system, its output moves when
+    the ledger grows, so the same genome scores differently in generation 10 and generation 500
+    and no parent→child comparison means anything.
+
+    `t = SR·√T` carries no family-size term at all, so this score is stable across the whole
+    marathon. The BHY correction (valid under arbitrary dependence — our trials share features)
+    keeps the promotion rate honest: at q=0.10 roughly one in ten promotions is expected to be
+    false, which is the correct trade for a stage whose output still has to survive Stage B."""
+    n = int(len(net))
+    if n < MIN_PERIODS:
+        return GateResult("GS_screen", "fail", {"n_periods": n}, f"too few periods ({n})")
+    from mt.gauntlet.multipletest import sharpe_pvalue
+    srpp = _sharpe(net.to_numpy())
+    if not np.isfinite(srpp) or abs(srpp) > MAX_SANE_SR_PP:
+        return GateResult("GS_screen", "fail", {"sharpe_pp": None}, "degenerate return series")
+    p = sharpe_pvalue(srpp, n)
+    edge_t = float(srpp * np.sqrt(n))
+    if fdr_threshold is None:                       # nothing in the batch is a discovery yet
+        return GateResult("GS_screen", "fail",
+                          {"p_single": p, "edge_t": round(edge_t, 4), "fdr_threshold": None,
+                           "fdr_q": q},
+                          f"no BHY discovery at q={q} in the current trial population")
+    passed = bool(p is not None and p <= fdr_threshold and srpp > 0)
+    reason = "" if passed else (f"p={None if p is None else round(p, 5)} > BHY threshold "
+                                f"{round(fdr_threshold, 5)} at q={q}")
+    return GateResult("GS_screen", "pass" if passed else "fail",
+                      {"p_single": None if p is None else round(p, 6), "edge_t": round(edge_t, 4),
+                       "fdr_threshold": round(fdr_threshold, 6), "fdr_q": q}, reason)
 
 
 # ── G4b Reality Check (non-parametric multiple-testing firewall, alongside G4) ─
@@ -174,9 +218,20 @@ def g8_orthogonality(res, ctx) -> GateResult:
         c = abs(float(np.corrcoef(a, b)[0, 1]))
         if np.isfinite(c):
             max_corr = max(max_corr, c)
-    passed = max_corr < MAX_ARCHIVE_CORR
-    reason = "" if passed else f"return corr {max_corr:.2f} ≥ {MAX_ARCHIVE_CORR} — duplicates an archive member"
-    return GateResult("G8_orthogonality", "pass" if passed else "fail", {"max_corr": round(max_corr, 3)}, reason)
+    # Hard-reject only a near-EXACT clone; everything between MAX_ARCHIVE_CORR and that is handled
+    # by a continuous fitness DISCOUNT in the runner's scalarization. A hard 0.90 wall was safe
+    # while the archive was empty (it never fired: 0 of 400 verdicts measured a real correlation),
+    # but now that the archive admits by niche it would become a false-reject wall on genuinely
+    # related-but-distinct strategies. Penalising similarity continuously — rather than forbidding
+    # it — is what redirects the search instead of merely blocking it (AutoAlpha PCA-QD; WorldQuant
+    # discounts an alpha's score by its max correlation to the existing pool).
+    passed = max_corr < CLONE_CORR
+    reason = "" if passed else f"return corr {max_corr:.2f} ≥ {CLONE_CORR} — an exact duplicate of an archive member"
+    return GateResult("G8_orthogonality", "pass" if passed else "fail",
+                      {"max_corr": round(max_corr, 3),
+                       "similarity_penalty": round(max(0.0, max_corr - MAX_ARCHIVE_CORR) /
+                                                   max(1e-9, CLONE_CORR - MAX_ARCHIVE_CORR), 3)},
+                      reason)
 
 
 # ── G3 CPCV → PBO (expensive; needs evaluator) ─────────────────────────────

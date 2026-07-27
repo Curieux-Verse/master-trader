@@ -12,7 +12,7 @@ from typing import List, Tuple
 import numpy as np
 
 from mt.genome.schema import Genome
-from mt.genome.ops import mutate, crossover
+from mt.genome.ops import mutate, novelty_mutate, crossover, distance
 from mt.gauntlet.runner import GauntletReport
 
 
@@ -28,18 +28,24 @@ def _num(v, fill: float) -> float:
 
 
 def objectives(report: GauntletReport) -> np.ndarray:
-    """The maximize-all objective vector (missing/NaN objectives get conservative fills)."""
+    """The maximize-all objective vector (missing/NaN objectives get conservative fills).
+
+    `edge_t` is deliberately included and deliberately FIRST-CLASS: it is the only component that
+    does not move when the trial ledger grows. Ranking purely on N-deflated quantities made a
+    parent and its child incomparable across generations, since both were being shifted by a
+    counter that has nothing to do with either strategy (docs/15 §4)."""
     f = report.fitness
     ds = f.get("deflated_sharpe")
     if ds is None:
         ds = f.get("net_sharpe")
     ds = _num(ds, -10.0)
+    edge = _num(f.get("edge_t"), -10.0)                 # N-INDEPENDENT strength
     omp = _num(f.get("one_minus_pbo"), 0.0)
     cap = _num(f.get("capacity_sharpe_2x"), -10.0)
     nac = _num(f.get("neg_archive_corr"), 0.0)
     neg_cx = _num(f.get("neg_complexity", -6), -6.0)
     oos = _num(f.get("cpcv_oos_sharpe"), 0.0)          # reward configs that survive CPCV OOS (B7)
-    return np.array([ds, omp, cap, neg_cx, nac, oos], dtype=float)
+    return np.array([ds, edge, omp, cap, neg_cx, nac, oos], dtype=float)
 
 
 def _dominates(a: np.ndarray, b: np.ndarray) -> bool:
@@ -113,19 +119,48 @@ def select_parents(genomes: List[Genome], reports: List[GauntletReport], k: int)
     return [genomes[i] for i in select_parent_indices(reports, k)]
 
 
-def breed(parents: List[Genome], n_children: int, rng: np.random.Generator) -> List[Genome]:
-    """Offspring via crossover (+ mutation) or mutation, staying registry-valid."""
+def breed(parents: List[Genome], n_children: int, rng: np.random.Generator,
+          op_weights=None, avoid: List[Genome] = None) -> List[Genome]:
+    """Offspring via crossover (+ mutation) or mutation, staying registry-valid.
+
+    `op_weights` biases new primitives toward measured contribution; `avoid` (the current archive
+    elites) turns the mutation step into a novelty-seeking one, so a converged parent pool stops
+    emitting parameter jitter on the same idea. Each child is also compared against its siblings,
+    so one call cannot return a batch of clones."""
     if not parents:
         return []
     children: List[Genome] = []
+    avoid = list(avoid or [])
     for _ in range(n_children):
         if len(parents) >= 2 and rng.random() < 0.6:
             i, j = rng.integers(len(parents)), rng.integers(len(parents))
             child = crossover(parents[int(i)], parents[int(j)], rng)
             if rng.random() < 0.5:
-                child = mutate(child, rng)
+                child = novelty_mutate(child, rng, avoid + children, op_weights=op_weights)
         else:
-            child = mutate(parents[int(rng.integers(len(parents)))], rng)
+            parent = parents[int(rng.integers(len(parents)))]
+            child = novelty_mutate(parent, rng, avoid + children, op_weights=op_weights)
         if child.typecheck()[0]:
             children.append(child)
     return children
+
+
+def diverse_subset(genomes: List[Genome], k: int) -> List[int]:
+    """Indices of a max-min structurally diverse subset (greedy farthest-point), order-preserving
+    on the first pick. Used for warm-start: taking the top-k by score alone reseeded each marathon
+    with near-identical elites, so 'compounding' compounded one idea."""
+    if not genomes:
+        return []
+    chosen = [0]
+    while len(chosen) < min(k, len(genomes)):
+        best_i, best_d = None, -1.0
+        for i in range(len(genomes)):
+            if i in chosen:
+                continue
+            d = min(distance(genomes[i], genomes[c]) for c in chosen)
+            if d > best_d:
+                best_i, best_d = i, d
+        if best_i is None:
+            break
+        chosen.append(best_i)
+    return chosen
