@@ -377,9 +377,10 @@ def experiment_minted_vocab_persists(seed: int = 15) -> dict:
     from mt.improve import miner as M
     from mt.genome.registry import REGISTRY
     from mt.genome.schema import FeatureNode
-    from mt.adapters import MarketAdapter
-    panel = MarketAdapter("crypto").build_panel(bars=440, seed=seed, structure=0.0,
-                                                snapshot_id="selftest_mint")
+    # make_panel (not MarketAdapter): the self-test must run on a bare CI runner, where the
+    # CC_Trading/FX_Trading roots the subprocess workers need do not exist. Every other experiment
+    # here already builds its panel in-process for exactly this reason.
+    panel = make_panel(edge=True, n_sym=8, bars=600, seed=seed)
     tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False); tmp.close()
     store = MTStore(db_path=tmp.name)
     rng = np.random.default_rng(seed)
