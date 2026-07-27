@@ -386,20 +386,40 @@ class MTStore:
         return out
 
     def sr_trial_std(self, market: Optional[str] = None) -> Optional[float]:
-        """Std of per-observation Sharpes across trials — the σ_SR that scales the Deflated
-        Sharpe deflation (docs/05 §3). None until enough finite trials exist."""
+        """ROBUST dispersion of per-observation Sharpes across trials — the σ_SR that scales the
+        entire Deflated-Sharpe deflation (docs/05 §3). None until enough finite trials exist.
+
+        This must be robust, because the ledger is written BEFORE the gauntlet runs: a genome whose
+        returns are near-constant has a float-noise standard deviation and therefore an absurd
+        per-bar Sharpe, and G1 rejects it only AFTER `record_eval` has already stored it. The real
+        production brain shows exactly that — `sharpe_pp` ranging to 38,026 (and −421), with 10% of
+        all trials above |10|, a value that is physically impossible for a per-observation Sharpe.
+
+        The plain standard deviation over that ledger is 2,497.5 versus 0.2253 for the sane 82%.
+        Since the deflation term is σ_SR·E[max of N], a contaminated σ makes E[max SR] ≈ 10,000
+        Sharpe units and drives EVERY candidate's z to minus infinity — nothing can ever clear the
+        bar, for reasons that have nothing to do with the strategies.
+
+        Fixed two ways: drop values the gates already consider numerically degenerate, then use a
+        median-absolute-deviation estimator (×1.4826 for normal consistency) so that any remaining
+        outlier cannot move the scale. Falls back to the plain std only if the MAD degenerates."""
+        from mt.adapters.cclib import MAX_SANE_SR_PP
         q = "SELECT sharpe_pp FROM result_ledger WHERE sharpe_pp IS NOT NULL"
         params: tuple = ()
         if market:
             q += " AND market=?"; params = (market,)
         vals = [r[0] for r in self.conn.execute(q, params).fetchall() if r[0] is not None]
         import math
-        vals = [v for v in vals if math.isfinite(v)]
+        import statistics
+        vals = [v for v in vals if math.isfinite(v) and abs(v) <= MAX_SANE_SR_PP]
         if len(vals) < 8:
             return None
-        import statistics
-        s = statistics.pstdev(vals)
-        return float(s) if s > 0 else None
+        med = statistics.median(vals)
+        mad = statistics.median([abs(v - med) for v in vals])
+        s = 1.4826 * mad
+        if not (s > 0 and math.isfinite(s)):
+            s = statistics.pstdev(vals)
+        return float(s) if s > 0 and math.isfinite(s) else None
 
     def record_attribution(self, market: str, feature_op: str, delta_z: float) -> None:
         """Store one leave-one-out ΔDSR-z: how much DROPPING this feature hurt a near-miss genome's

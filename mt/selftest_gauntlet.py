@@ -226,7 +226,33 @@ def experiment_gate_robustness() -> dict:
                  np.random.default_rng(2).normal(0.001, 0.02, 48)]
     dd = bootstrap_drawdown(ruin.tolist(), n_sims=400, seed=1).get("max_dd_95")
     dd_ok = dd is not None and np.isfinite(dd) and 0.0 <= dd <= 1.0
-    return {"const_reject": const_reject, "near_reject": near_reject, "ruin_dd": dd, "dd_ok": dd_ok}
+
+    # σ_SR must survive a CONTAMINATED ledger. The ledger is written before the gauntlet runs, so
+    # degenerate genomes (near-constant returns → float-noise std → absurd Sharpe) are stored even
+    # though G1 rejects them. The real production brain holds sharpe_pp up to 38,026, which made
+    # the plain std 2,497 against a true value of ~0.23 — and since the deflation is σ_SR·E[max N],
+    # that alone drove every candidate's z to minus infinity. A robust estimator is not a nicety
+    # here; without it nothing can ever clear the bar regardless of the strategies.
+    import os, tempfile, sqlite3
+    from mt.store import MTStore
+    tmpc = tempfile.NamedTemporaryFile(suffix=".db", delete=False); tmpc.close()
+    st = MTStore(db_path=tmpc.name)
+    rng2 = np.random.default_rng(3)
+    clean = list(rng2.normal(0.0, 0.22, 200))                 # plausible per-bar Sharpes
+    junk = [38026.5, -421.2, 17201.9, 9999.0, 5000.0] * 4      # numerical degenerates (~9%)
+    for i, v in enumerate(clean + junk):
+        st.conn.execute("INSERT INTO result_ledger(genome_id,market,sharpe_pp,n_periods,created_at)"
+                        " VALUES(?,?,?,?,0)", (f"c{i}", "crypto", float(v), 300))
+    st.conn.commit()
+    sigma = st.sr_trial_std("crypto")
+    st.close()
+    try:
+        os.unlink(tmpc.name)
+    except OSError:
+        pass
+    sigma_ok = sigma is not None and 0.05 < sigma < 1.0        # true value ≈0.22, not thousands
+    return {"const_reject": const_reject, "near_reject": near_reject, "ruin_dd": dd, "dd_ok": dd_ok,
+            "sigma_contaminated": None if sigma is None else round(sigma, 4), "sigma_ok": sigma_ok}
 
 
 def experiment_keff_duplicates(seed: int = 11) -> dict:
@@ -473,7 +499,7 @@ def run(verbose: bool = True) -> dict:
     # correlated trials collapse (N_eff ≪ raw) AND diverse trials do not
     neff_ok = (c["dup_neff"] <= max(3, c["dup_raw"] // 3)) and (c["div_neff"] >= c["div_raw"] // 2)
     dir_ok = bool(d["time_aligned"] and d["pbo_runs"])   # directional CPCV aligns by TIME, not position
-    robust_ok = bool(e["const_reject"] and e["near_reject"] and e["dd_ok"])  # degenerate/ruin can't slip
+    robust_ok = bool(e["const_reject"] and e["near_reject"] and e["dd_ok"] and e["sigma_ok"])
     keff_ok = bool(f["ok"])                         # K_eff collapses on clones, holds on diversity
     dedup_ok = bool(h["ok"])                        # a repeat evaluation charges no new trial
     stage_ok = bool(i["ok"])                        # confirmation still rejects; holdout not leaked
@@ -500,7 +526,9 @@ def run(verbose: bool = True) -> dict:
         print(f"\n(D) Directional CPCV alignment: 3 variants trading on different bars → matrix {d['matrix_shape']}")
         print(f"    -> {'PASS ✓ (aligned by TIME on the union calendar, flat bars = 0)' if dir_ok else 'FAIL ✗ (position-aligned / misaligned)'}")
         print(f"\n(E) Gate robustness: (near-)constant series rejected, ruin drawdown={e['ruin_dd']}")
-        print(f"    -> {'PASS ✓ (degenerate Sharpe rejected at G1; DD stays in [0,1])' if robust_ok else 'FAIL ✗ (degenerate/ruin slipped through)'}")
+        print(f"    σ_SR on a ledger contaminated with degenerate Sharpes = {e['sigma_contaminated']}"
+              f"   (true ≈0.22; a plain std would read ~2500 and drive every z to −∞)")
+        print(f"    -> {'PASS ✓ (degenerate Sharpe rejected at G1; DD in [0,1]; σ_SR stays robust)' if robust_ok else 'FAIL ✗ (degenerate/ruin/contamination slipped through)'}")
         print(f"\n(F) K_eff vs duplication: 30 clones→{f['dup_neff']}, 30 diverse→{f['div_neff']}, "
               f"25 clones+5 diverse→{f['mixed_neff']} (truth 6)")
         print(f"    -> {'PASS ✓ (family size collapses on clones, holds on real diversity)' if keff_ok else 'FAIL ✗'}")
