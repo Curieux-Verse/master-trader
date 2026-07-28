@@ -1,19 +1,19 @@
 # 🧬 Master Trader — Genome Population Report
 
-*Generated 2026-07-28 04:02 UTC · source `/home/runner/work/master-trader/master-trader/var/mt.db`*
+*Generated 2026-07-28 14:05 UTC · source `/home/runner/work/master-trader/master-trader/var/mt.db`*
 
 ## 1 · Executive summary
 
 | | |
 |---|---|
-| Genomes generated & tested | **158,465** |
-| Deflated-Sharpe trial count (raw N) | **354,983** *(evals 237,663 + 117,320 screened)* |
-| **Effective** independent trials (N_eff) | **264,408** *(ρ̄=0.029257442502756723 — the bar the DSR actually uses)* |
-| Admitted to archive | **3631** |
-| Rejected | **154,834** (97.7%) |
+| Genomes generated & tested | **217,098** |
+| Deflated-Sharpe trial count (raw N) | **413,616** *(evals 296,296 + 117,320 screened)* |
+| **Effective** independent trials (N_eff) | **234,430** *(ρ̄=0.10333362306699923 — the bar the DSR actually uses)* |
+| Admitted to archive | **22052** |
+| Rejected | **195,046** (89.8%) |
 | Distinct families explored | **31** |
-| Lessons accumulated | **18,906** |
-| Best DSR-z | **+2.345** vs bar 1.645 — ✅ **cleared the bar** |
+| Lessons accumulated | **56,773** |
+| Best DSR-z | **+2.714** vs bar 1.645 — ✅ **cleared the bar** |
 
 **How to read `DSR-z`:** `0` = the luck bar (what the best of N random trials would score); **`1.645` = statistically significant at p<0.05.** Higher is better; it is the single number that says how close the search is to a genuine edge.
 
@@ -23,188 +23,188 @@
 
 | # | genome | market | DSR-z | sharpe/obs | net sharpe | max DD | phenotype | regime | died at |
 |--:|---|---|---:|---:|---:|---:|---|---|---|
-| 1 | `a18e5b4116136194` | crypto | **2.35** ✅ | 0.9566 | 6.53 | 0.035 | cross_sectional | all | `G8_orthogonality` |
-| 2 | `964e4bf4fbacc8f7` | crypto | **2.32** ✅ | 0.9492 | 6.48 | 0.035 | cross_sectional | all | `G8_orthogonality` |
-| 3 | `89a27681b38b0520` | crypto | **2.32** ✅ | 0.9568 | 6.53 | 0.035 | cross_sectional | all | `G8_orthogonality` |
-| 4 | `2e85552d653efedf` | crypto | **2.28** ✅ | 0.9565 | 6.53 | 0.053 | cross_sectional | all | `G8_orthogonality` |
-| 5 | `114eeb894a0cc7ad` | crypto | **2.24** ✅ | 0.9608 | 6.56 | 0.053 | cross_sectional | all | `G8_orthogonality` |
-| 6 | `44336b2629822dda` | crypto | **2.23** ✅ | 0.9414 | 6.43 | 0.035 | cross_sectional | all | `G8_orthogonality` |
-| 7 | `0a5b18d055087eaa` | crypto | **2.22** ✅ | 0.9608 | 6.56 | 0.053 | cross_sectional | all | `G8_orthogonality` |
-| 8 | `721f3eb7f677cb55` | crypto | **2.19** ✅ | 0.9590 | 6.55 | 0.053 | cross_sectional | all | `G8_orthogonality` |
-| 9 | `757bf6b2afe3e6e7` | crypto | **2.17** ✅ | 0.9541 | 6.51 | 0.053 | cross_sectional | all | `G8_orthogonality` |
-| 10 | `5b4ceda18d0ce825` | crypto | **2.17** ✅ | 0.9553 | 6.52 | 0.053 | cross_sectional | all | `G8_orthogonality` |
-| 11 | `b82c7b568fa01438` | crypto | **2.13** ✅ | 0.9541 | 6.51 | 0.053 | cross_sectional | all | `G8_orthogonality` |
-| 12 | `367d789e05a29a5b` | crypto | **2.13** ✅ | 0.9610 | 6.56 | 0.053 | cross_sectional | all | `G8_orthogonality` |
-| 13 | `6748ff23112c403d` | crypto | **2.12** ✅ | 0.9526 | 6.50 | 0.053 | cross_sectional | all | `ADMITTED` |
-| 14 | `203e87acbc70d506` | crypto | **2.11** ✅ | 0.9508 | 6.49 | 0.053 | cross_sectional | all | `ADMITTED` |
-| 15 | `6b67d42e33f78f49` | crypto | **2.10** ✅ | 0.9562 | 6.53 | 0.053 | cross_sectional | all | `ADMITTED` |
-| 16 | `e9c2d285112d1a5c` | crypto | **2.10** ✅ | 0.9415 | 6.43 | 0.053 | cross_sectional | all | `ADMITTED` |
-| 17 | `58233c33043ebf60` | crypto | **2.09** ✅ | 0.9571 | 6.53 | 0.053 | cross_sectional | all | `ADMITTED` |
-| 18 | `b2b22a197c72b51a` | crypto | **2.08** ✅ | 0.9456 | 6.45 | 0.053 | cross_sectional | all | `G8_orthogonality` |
-| 19 | `98608bfaf3fa9ea4` | crypto | **2.08** ✅ | 0.9415 | 6.43 | 0.053 | cross_sectional | all | `ADMITTED` |
-| 20 | `b90757e9fa877bda` | crypto | **2.07** ✅ | 0.9186 | 6.27 | 0.035 | cross_sectional | all | `ADMITTED` |
+| 1 | `756f4b4cb0215305` | fx | **2.71** ✅ | 1.5512 | 10.48 | 0.000 | cross_sectional | all | `ADMITTED` |
+| 2 | `f565adc2296dd0c5` | fx | **2.71** ✅ | 1.5512 | 10.48 | 0.000 | cross_sectional | all | `G8_orthogonality` |
+| 3 | `4b0a1c225b39b8a9` | fx | **2.70** ✅ | 1.5512 | 10.48 | 0.000 | cross_sectional | all | `G8_orthogonality` |
+| 4 | `62329a6764ad97f2` | fx | **2.66** ✅ | 1.5313 | 10.34 | 0.000 | cross_sectional | all | `ADMITTED` |
+| 5 | `c9d0b80b4cfe4d4b` | fx | **2.47** ✅ | 1.4777 | 9.98 | 0.000 | cross_sectional | all | `ADMITTED` |
+| 6 | `496721e576443bea` | fx | **2.47** ✅ | 1.4777 | 9.98 | 0.000 | cross_sectional | all | `G8_orthogonality` |
+| 7 | `d975c1a4d38e2758` | fx | **2.45** ✅ | 1.5289 | 10.33 | 0.000 | cross_sectional | all | `ADMITTED` |
+| 8 | `9f5e3668764a1557` | fx | **2.43** ✅ | 1.5403 | 10.40 | 0.000 | cross_sectional | all | `ADMITTED` |
+| 9 | `829a32f9b7de3f76` | fx | **2.42** ✅ | 1.5719 | 10.62 | 0.000 | cross_sectional | all | `ADMITTED` |
+| 10 | `4f508d1ef6104389` | crypto | **2.41** ✅ | 1.0790 | 7.37 | 0.040 | cross_sectional | all | `ADMITTED` |
+| 11 | `af9c2944588a6691` | crypto | **2.40** ✅ | 1.0791 | 7.37 | 0.044 | cross_sectional | all | `ADMITTED` |
+| 12 | `eae09a8bcdefa330` | fx | **2.39** ✅ | 1.5403 | 10.40 | 0.000 | cross_sectional | all | `ADMITTED` |
+| 13 | `3898f7908cfceda7` | fx | **2.39** ✅ | 1.5403 | 10.40 | 0.000 | cross_sectional | all | `ADMITTED` |
+| 14 | `f2d2e3c981201bb9` | fx | **2.39** ✅ | 1.5403 | 10.40 | 0.000 | cross_sectional | all | `ADMITTED` |
+| 15 | `8790576b67b2ba16` | fx | **2.39** ✅ | 1.5148 | 10.23 | 0.000 | cross_sectional | all | `ADMITTED` |
+| 16 | `769376c9f4686bc4` | fx | **2.39** ✅ | 1.7051 | 11.52 | 0.000 | cross_sectional | all | `ADMITTED` |
+| 17 | `55b80bbeb1b15234` | fx | **2.38** ✅ | 1.7493 | 11.82 | 0.001 | cross_sectional | all | `G8_orthogonality` |
+| 18 | `e41648aa5c632f0e` | fx | **2.38** ✅ | 1.6054 | 10.84 | 0.000 | cross_sectional | all | `ADMITTED` |
+| 19 | `1910a2f4ddd61623` | fx | **2.38** ✅ | 1.7664 | 11.93 | 0.000 | cross_sectional | all | `ADMITTED` |
+| 20 | `62dce1e8bc85b432` | fx | **2.37** ✅ | 1.7051 | 11.52 | 0.000 | cross_sectional | all | `ADMITTED` |
 
 <details><summary><b>Full DSL recipes for the top candidates</b></summary>
 
-**#1 · `a18e5b4116136194` — DSR-z 2.35 · died at `G8_orthogonality` · families: breakout, liquidity, microstructure, pattern, volatility**
+**#1 · `756f4b4cb0215305` — DSR-z 2.71 · died at `ADMITTED` · families: momentum, oscillator, pattern, statistical, trend, volatility**
 ```
-[crypto] weighted_blend (long_bias) on 4h
-  features: amihud_illiquidity(window=182); breakout(window=14); atr_expansion(window=68)
-  sizing:   rank_bucket(top_frac=0.18045218177412267, gross=1.2771138515752631, per_name_cap=0.0921862561511815)
-  risk:     horizon_hold(horizon=47, cost_stress=1.0034517329096022)
-  id=a18e5b4116136194  gen=186  by=evo_mutate  nodes=6
+[fx] gated_or (long_bias) on H4
+  features: macd(fast=7, slow=23, signal=19); cci(window=5); ema_dist(window=184); realized_vol(window=16); candlestick_pattern(pattern=pin); variance_ratio(window=43, q=7)
+  sizing:   rank_bucket(top_frac=0.18225207774899146, gross=1.0, per_name_cap=0.04687803515421096)
+  risk:     horizon_hold(horizon=48, cost_stress=1.0)
+  id=756f4b4cb0215305  gen=108  by=evo_mutate  nodes=9
 ```
-**#2 · `964e4bf4fbacc8f7` — DSR-z 2.32 · died at `G8_orthogonality` · families: breakout, liquidity, microstructure, pattern, volatility**
+**#2 · `f565adc2296dd0c5` — DSR-z 2.71 · died at `G8_orthogonality` · families: momentum, oscillator, pattern, statistical, trend, volatility**
 ```
-[crypto] weighted_blend (long_bias) on 4h
-  features: amihud_illiquidity(window=182); breakout(window=14); atr_expansion(window=68)
-  sizing:   rank_bucket(top_frac=0.18045218177412267, gross=1.2771138515752631, per_name_cap=0.0921862561511815)
-  risk:     horizon_hold(horizon=47, cost_stress=1.152415413989577)
-  id=964e4bf4fbacc8f7  gen=188  by=evo_mutate  nodes=6
+[fx] gated_or (long_bias) on H4
+  features: macd(fast=7, slow=23, signal=19); cci(window=5); ema_dist(window=184); realized_vol(window=16); candlestick_pattern(pattern=pin); variance_ratio(window=43, q=7)
+  sizing:   rank_bucket(top_frac=0.17412637810828982, gross=1.0, per_name_cap=0.09511358859730075)
+  risk:     horizon_hold(horizon=48, cost_stress=1.0)
+  id=f565adc2296dd0c5  gen=111  by=evo_mutate  nodes=9
 ```
-**#3 · `89a27681b38b0520` — DSR-z 2.32 · died at `G8_orthogonality` · families: breakout, liquidity, microstructure, pattern, volatility**
+**#3 · `4b0a1c225b39b8a9` — DSR-z 2.70 · died at `G8_orthogonality` · families: momentum, oscillator, pattern, statistical, trend, volatility**
 ```
-[crypto] weighted_blend (long_bias) on 4h
-  features: amihud_illiquidity(window=182); breakout(window=14); atr_expansion(window=68)
-  sizing:   rank_bucket(top_frac=0.18045218177412267, gross=1.2771138515752631, per_name_cap=0.0921862561511815)
-  risk:     horizon_hold(horizon=47, cost_stress=1.0)
-  id=89a27681b38b0520  gen=185  by=evo_mutate  nodes=6
+[fx] gated_or (long_bias) on H4
+  features: macd(fast=7, slow=23, signal=19); cci(window=5); ema_dist(window=184); realized_vol(window=16); candlestick_pattern(pattern=pin); variance_ratio(window=43, q=7)
+  sizing:   rank_bucket(top_frac=0.21, gross=1.0, per_name_cap=0.09511358859730075)
+  risk:     horizon_hold(horizon=48, cost_stress=1.0)
+  id=4b0a1c225b39b8a9  gen=110  by=evo_mutate  nodes=9
 ```
-**#4 · `2e85552d653efedf` — DSR-z 2.28 · died at `G8_orthogonality` · families: breakout, liquidity, microstructure, pattern, volatility**
+**#4 · `62329a6764ad97f2` — DSR-z 2.66 · died at `ADMITTED` · families: momentum, oscillator, pattern, statistical, trend, volatility**
 ```
-[crypto] weighted_blend (long_bias) on 4h
-  features: amihud_illiquidity(window=182); breakout(window=14); atr_expansion(window=68)
-  sizing:   rank_bucket(top_frac=0.18045218177412267, gross=1.9383322651666948, per_name_cap=0.13936442095981705)
-  risk:     horizon_hold(horizon=47, cost_stress=1.0)
-  id=2e85552d653efedf  gen=189  by=evo_mutate  nodes=6
+[fx] gated_or (long_bias) on H4
+  features: macd(fast=7, slow=23, signal=19); cci(window=5); ema_dist(window=184); realized_vol(window=16); candlestick_pattern(pattern=pin); variance_ratio(window=43, q=7)
+  sizing:   rank_bucket(top_frac=0.21, gross=1.0, per_name_cap=0.14029229848303446)
+  risk:     horizon_hold(horizon=48, cost_stress=1.0)
+  id=62329a6764ad97f2  gen=112  by=evo_crossover  nodes=9
 ```
-**#5 · `114eeb894a0cc7ad` — DSR-z 2.24 · died at `G8_orthogonality` · families: breakout, liquidity, microstructure, pattern, volatility**
+**#5 · `c9d0b80b4cfe4d4b` — DSR-z 2.47 · died at `ADMITTED` · families: oscillator, pattern, statistical, trend, volatility**
 ```
-[crypto] weighted_blend (long_bias) on 4h
-  features: amihud_illiquidity(window=182); breakout(window=14); atr_expansion(window=68)
-  sizing:   rank_bucket(top_frac=0.18045218177412267, gross=1.7573397835453717, per_name_cap=0.13936442095981705)
-  risk:     horizon_hold(horizon=47, cost_stress=1.0)
-  id=114eeb894a0cc7ad  gen=241  by=evo_mutate  nodes=6
+[fx] gated_or (long_bias) on H4
+  features: ma_cross(fast=4, slow=14); cci(window=5); ema_dist(window=184); realized_vol(window=16); candlestick_pattern(pattern=pin); variance_ratio(window=43, q=7)
+  sizing:   rank_bucket(top_frac=0.18225207774899146, gross=1.0, per_name_cap=0.04687803515421096)
+  risk:     horizon_hold(horizon=48, cost_stress=1.0)
+  id=c9d0b80b4cfe4d4b  gen=109  by=evo_mutate  nodes=9
 ```
-**#6 · `44336b2629822dda` — DSR-z 2.23 · died at `G8_orthogonality` · families: breakout, liquidity, microstructure, pattern, volatility**
+**#6 · `496721e576443bea` — DSR-z 2.47 · died at `G8_orthogonality` · families: oscillator, pattern, statistical, trend, volatility**
 ```
-[crypto] weighted_blend (long_bias) on 4h
-  features: amihud_illiquidity(window=182); breakout(window=14); atr_expansion(window=68)
-  sizing:   rank_bucket(top_frac=0.18045218177412267, gross=1.2771138515752631, per_name_cap=0.0921862561511815)
-  risk:     horizon_hold(horizon=47, cost_stress=1.308208430289754)
-  id=44336b2629822dda  gen=186  by=evo_mutate  nodes=6
+[fx] gated_or (long_bias) on H4
+  features: ma_cross(fast=4, slow=14); cci(window=5); ema_dist(window=184); realized_vol(window=16); candlestick_pattern(pattern=pin); variance_ratio(window=43, q=7)
+  sizing:   rank_bucket(top_frac=0.21, gross=1.0, per_name_cap=0.09511358859730075)
+  risk:     horizon_hold(horizon=48, cost_stress=1.0)
+  id=496721e576443bea  gen=110  by=evo_crossover  nodes=9
 ```
-**#7 · `0a5b18d055087eaa` — DSR-z 2.22 · died at `G8_orthogonality` · families: breakout, liquidity, microstructure, pattern, volatility**
+**#7 · `d975c1a4d38e2758` — DSR-z 2.45 · died at `ADMITTED` · families: oscillator, pattern, statistical, trend, volatility**
 ```
-[crypto] weighted_blend (long_bias) on 4h
-  features: amihud_illiquidity(window=182); breakout(window=14); atr_expansion(window=68)
-  sizing:   rank_bucket(top_frac=0.18045218177412267, gross=1.7573397835453717, per_name_cap=0.13936442095981705)
-  risk:     horizon_hold(horizon=47, cost_stress=1.0)
-  id=0a5b18d055087eaa  gen=188  by=evo_mutate  nodes=6
+[fx] gated_or (long_bias) on H4
+  features: ema_dist(window=15); cci(window=5); ema_dist(window=184); realized_vol(window=16); candlestick_pattern(pattern=pin); variance_ratio(window=43, q=7)
+  sizing:   rank_bucket(top_frac=0.21, gross=1.0, per_name_cap=0.09511358859730075)
+  risk:     horizon_hold(horizon=48, cost_stress=1.0)
+  id=d975c1a4d38e2758  gen=146  by=evo_mutate  nodes=9
 ```
-**#8 · `721f3eb7f677cb55` — DSR-z 2.19 · died at `G8_orthogonality` · families: breakout, liquidity, microstructure, pattern, volatility**
+**#8 · `9f5e3668764a1557` — DSR-z 2.43 · died at `ADMITTED` · families: macro, oscillator, pattern, sentiment, volatility, volume**
 ```
-[crypto] weighted_blend (long_bias) on 4h
-  features: amihud_illiquidity(window=182); breakout(window=14); atr_expansion(window=68)
-  sizing:   rank_bucket(top_frac=0.18045218177412267, gross=1.7446705606517607, per_name_cap=0.13936442095981705)
-  risk:     horizon_hold(horizon=47, cost_stress=1.0398229746950594)
-  id=721f3eb7f677cb55  gen=248  by=evo_mutate  nodes=6
+[fx] gated_or (long_bias) on H4
+  features: cci(window=5); realized_vol(window=16); candlestick_pattern(pattern=pin); news_sentiment(window=20); rel_volume(window=135)
+  sizing:   rank_bucket(top_frac=0.21, gross=1.0, per_name_cap=0.07297557077671206)
+  risk:     horizon_hold(horizon=48, cost_stress=1.0)
+  id=9f5e3668764a1557  gen=194  by=evo_mutate  nodes=8
 ```
-**#9 · `757bf6b2afe3e6e7` — DSR-z 2.17 · died at `G8_orthogonality` · families: breakout, liquidity, microstructure, pattern, volatility**
+**#9 · `829a32f9b7de3f76` — DSR-z 2.42 · died at `ADMITTED` · families: macro, oscillator, pattern, sentiment, volatility, volume**
 ```
-[crypto] weighted_blend (long_bias) on 4h
-  features: amihud_illiquidity(window=182); breakout(window=14); atr_expansion(window=68)
-  sizing:   rank_bucket(top_frac=0.18045218177412267, gross=1.7446705606517607, per_name_cap=0.13936442095981705)
-  risk:     horizon_hold(horizon=47, cost_stress=1.1381591122691177)
-  id=757bf6b2afe3e6e7  gen=260  by=evo_mutate  nodes=6
+[fx] gated_or (long_bias) on H4
+  features: cci(window=5); realized_vol(window=16); candlestick_pattern(pattern=pin); news_sentiment(window=20); rel_volume(window=135); news_sentiment(window=8)
+  sizing:   rank_bucket(top_frac=0.21, gross=1.0, per_name_cap=0.14029229848303446)
+  risk:     horizon_hold(horizon=48, cost_stress=1.0)
+  id=829a32f9b7de3f76  gen=191  by=evo_mutate  nodes=9
 ```
-**#10 · `5b4ceda18d0ce825` — DSR-z 2.17 · died at `G8_orthogonality` · families: breakout, liquidity, microstructure, pattern, volatility**
-```
-[crypto] weighted_blend (long_bias) on 4h
-  features: amihud_illiquidity(window=182); breakout(window=14); atr_expansion(window=68)
-  sizing:   rank_bucket(top_frac=0.18045218177412267, gross=1.7446705606517607, per_name_cap=0.13936442095981705)
-  risk:     horizon_hold(horizon=47, cost_stress=1.1143000713965123)
-  id=5b4ceda18d0ce825  gen=260  by=evo_mutate  nodes=6
-```
-**#11 · `b82c7b568fa01438` — DSR-z 2.13 · died at `G8_orthogonality` · families: breakout, liquidity, microstructure, pattern, volatility**
+**#10 · `4f508d1ef6104389` — DSR-z 2.41 · died at `ADMITTED` · families: breakout, liquidity, microstructure, momentum, pattern, trend, volatility**
 ```
 [crypto] weighted_blend (neutral) on 4h
-  features: amihud_illiquidity(window=182); breakout(window=14); atr_expansion(window=68)
-  sizing:   rank_bucket(top_frac=0.18045218177412267, gross=1.7446705606517607, per_name_cap=0.13936442095981705)
-  risk:     horizon_hold(horizon=47, cost_stress=1.136773263191575)
-  id=b82c7b568fa01438  gen=281  by=evo_mutate  nodes=6
-```
-**#12 · `367d789e05a29a5b` — DSR-z 2.13 · died at `G8_orthogonality` · families: breakout, liquidity, microstructure, pattern, volatility**
-```
-[crypto] weighted_blend (long_bias) on 4h
-  features: amihud_illiquidity(window=182); breakout(window=14); atr_expansion(window=68)
-  sizing:   rank_bucket(top_frac=0.18045218177412267, gross=1.7446705606517607, per_name_cap=0.13936442095981705)
+  features: amihud_illiquidity(window=182); breakout(window=14); atr_expansion(window=68); amihud_illiquidity(window=250); tsmom_blend(short=38, med=59, long=63)
+  sizing:   rank_bucket(top_frac=0.180452, gross=1.4835195432578485, per_name_cap=0.10539243851958019)
   risk:     horizon_hold(horizon=47, cost_stress=1.0)
-  id=367d789e05a29a5b  gen=247  by=evo_mutate  nodes=6
+  id=4f508d1ef6104389  gen=113  by=evo_mutate  nodes=8
 ```
-**#13 · `6748ff23112c403d` — DSR-z 2.12 · died at `ADMITTED` · families: breakout, liquidity, microstructure, pattern, volatility**
-```
-[crypto] weighted_blend (long_bias) on 4h
-  features: amihud_illiquidity(window=182); breakout(window=14); atr_expansion(window=68)
-  sizing:   rank_bucket(top_frac=0.18045218177412267, gross=1.2771138515752631, per_name_cap=0.13936442095981705)
-  risk:     horizon_hold(horizon=47, cost_stress=1.0866180485904633)
-  id=6748ff23112c403d  gen=176  by=evo_crossover  nodes=6
-```
-**#14 · `203e87acbc70d506` — DSR-z 2.11 · died at `ADMITTED` · families: breakout, liquidity, microstructure, pattern, volatility**
-```
-[crypto] weighted_blend (long_bias) on 4h
-  features: amihud_illiquidity(window=182); breakout(window=14); atr_expansion(window=68)
-  sizing:   rank_bucket(top_frac=0.18045218177412267, gross=1.2771138515752631, per_name_cap=0.13936442095981705)
-  risk:     horizon_hold(horizon=47, cost_stress=1.1213448964992694)
-  id=203e87acbc70d506  gen=159  by=evo_mutate  nodes=6
-```
-**#15 · `6b67d42e33f78f49` — DSR-z 2.10 · died at `ADMITTED` · families: breakout, liquidity, microstructure, pattern, volatility**
-```
-[crypto] weighted_blend (long_bias) on 4h
-  features: amihud_illiquidity(window=182); breakout(window=14); atr_expansion(window=68)
-  sizing:   rank_bucket(top_frac=0.18045218177412267, gross=1.2771138515752631, per_name_cap=0.13936442095981705)
-  risk:     horizon_hold(horizon=47, cost_stress=1.018164475540221)
-  id=6b67d42e33f78f49  gen=187  by=evo_mutate  nodes=6
-```
-**#16 · `e9c2d285112d1a5c` — DSR-z 2.10 · died at `ADMITTED` · families: breakout, liquidity, microstructure, pattern, volatility**
+**#11 · `af9c2944588a6691` — DSR-z 2.40 · died at `ADMITTED` · families: breakout, liquidity, microstructure, momentum, pattern, trend, volatility**
 ```
 [crypto] weighted_blend (neutral) on 4h
-  features: amihud_illiquidity(window=182); breakout(window=14); atr_expansion(window=68)
-  sizing:   rank_bucket(top_frac=0.18045218177412267, gross=1.2771138515752631, per_name_cap=0.13936442095981705)
-  risk:     horizon_hold(horizon=47, cost_stress=1.298944)
-  id=e9c2d285112d1a5c  gen=139  by=evo_mutate  nodes=6
-```
-**#17 · `58233c33043ebf60` — DSR-z 2.09 · died at `ADMITTED` · families: breakout, liquidity, microstructure, pattern, volatility**
-```
-[crypto] weighted_blend (neutral) on 4h
-  features: amihud_illiquidity(window=182); breakout(window=14); atr_expansion(window=68)
-  sizing:   rank_bucket(top_frac=0.18045218177412267, gross=1.2771138515752631, per_name_cap=0.13936442095981705)
+  features: amihud_illiquidity(window=182); breakout(window=14); atr_expansion(window=68); amihud_illiquidity(window=250); tsmom_blend(short=38, med=59, long=63)
+  sizing:   rank_bucket(top_frac=0.180452, gross=1.6136995382452015, per_name_cap=0.11544998622470065)
   risk:     horizon_hold(horizon=47, cost_stress=1.0)
-  id=58233c33043ebf60  gen=187  by=evo_mutate  nodes=6
+  id=af9c2944588a6691  gen=113  by=evo_mutate  nodes=8
 ```
-**#18 · `b2b22a197c72b51a` — DSR-z 2.08 · died at `G8_orthogonality` · families: breakout, liquidity, microstructure, pattern, volatility**
+**#12 · `eae09a8bcdefa330` — DSR-z 2.39 · died at `ADMITTED` · families: macro, oscillator, pattern, sentiment, volatility, volume**
 ```
-[crypto] weighted_blend (long_bias) on 4h
-  features: amihud_illiquidity(window=182); breakout(window=14); atr_expansion(window=66)
-  sizing:   rank_bucket(top_frac=0.18045218177412267, gross=1.7446705606517607, per_name_cap=0.13936442095981705)
-  risk:     horizon_hold(horizon=47, cost_stress=1.0)
-  id=b2b22a197c72b51a  gen=248  by=evo_mutate  nodes=6
+[fx] gated_or (long_bias) on H4
+  features: cci(window=5); realized_vol(window=16); candlestick_pattern(pattern=pin); news_sentiment(window=20); rel_volume(window=135)
+  sizing:   rank_bucket(top_frac=0.19425064002768988, gross=1.0, per_name_cap=0.09511358859730075)
+  risk:     horizon_hold(horizon=48, cost_stress=1.0)
+  id=eae09a8bcdefa330  gen=218  by=evo_mutate  nodes=8
 ```
-**#19 · `98608bfaf3fa9ea4` — DSR-z 2.08 · died at `ADMITTED` · families: breakout, liquidity, microstructure, pattern, volatility**
+**#13 · `3898f7908cfceda7` — DSR-z 2.39 · died at `ADMITTED` · families: macro, oscillator, pattern, sentiment, volatility, volume**
 ```
-[crypto] weighted_blend (neutral) on 4h
-  features: amihud_illiquidity(window=182); breakout(window=14); atr_expansion(window=68)
-  sizing:   rank_bucket(top_frac=0.18045218177412267, gross=1.2771138515752631, per_name_cap=0.13936442095981705)
-  risk:     horizon_hold(horizon=47, cost_stress=1.298944)
-  id=98608bfaf3fa9ea4  gen=138  by=evo_crossover  nodes=6
+[fx] gated_or (long_bias) on H4
+  features: cci(window=5); realized_vol(window=16); candlestick_pattern(pattern=pin); news_sentiment(window=20); rel_volume(window=135)
+  sizing:   rank_bucket(top_frac=0.21, gross=1.0, per_name_cap=0.09511358859730075)
+  risk:     horizon_hold(horizon=48, cost_stress=1.0)
+  id=3898f7908cfceda7  gen=186  by=evo_crossover  nodes=8
 ```
-**#20 · `b90757e9fa877bda` — DSR-z 2.07 · died at `ADMITTED` · families: breakout, liquidity, microstructure, pattern, volatility**
+**#14 · `f2d2e3c981201bb9` — DSR-z 2.39 · died at `ADMITTED` · families: macro, oscillator, pattern, sentiment, volatility, volume**
 ```
-[crypto] weighted_blend (long_bias) on 4h
-  features: amihud_illiquidity(window=182); breakout(window=14); atr_expansion(window=68)
-  sizing:   rank_bucket(top_frac=0.2018593855204894, gross=1.2771138515752631, per_name_cap=0.0921862561511815)
-  risk:     horizon_hold(horizon=47, cost_stress=1.0)
-  id=b90757e9fa877bda  gen=186  by=evo_mutate  nodes=6
+[fx] gated_or (long_bias) on H4
+  features: cci(window=5); realized_vol(window=16); candlestick_pattern(pattern=pin); news_sentiment(window=20); rel_volume(window=135)
+  sizing:   rank_bucket(top_frac=0.19128067206115637, gross=1.0, per_name_cap=0.09511358859730075)
+  risk:     horizon_hold(horizon=48, cost_stress=1.0)
+  id=f2d2e3c981201bb9  gen=210  by=evo_mutate  nodes=8
+```
+**#15 · `8790576b67b2ba16` — DSR-z 2.39 · died at `ADMITTED` · families: momentum, oscillator, pattern, statistical, trend, volatility**
+```
+[fx] gated_or (long_bias) on H4
+  features: cci(window=5); ema_dist(window=184); realized_vol(window=16); candlestick_pattern(pattern=pin); variance_ratio(window=43, q=7); rsi(window=10)
+  sizing:   rank_bucket(top_frac=0.21, gross=1.0, per_name_cap=0.09511358859730075)
+  risk:     horizon_hold(horizon=48, cost_stress=1.0)
+  id=8790576b67b2ba16  gen=112  by=evo_mutate  nodes=9
+```
+**#16 · `769376c9f4686bc4` — DSR-z 2.39 · died at `ADMITTED` · families: oscillator, pattern, statistical, volatility, volume**
+```
+[fx] gated_or (long_bias) on H4
+  features: cci(window=5); realized_vol(window=16); candlestick_pattern(pattern=pin); variance_ratio(window=43, q=7); rel_volume(window=135)
+  sizing:   rank_bucket(top_frac=0.21, gross=1.177697134096235, per_name_cap=0.09511358859730075)
+  risk:     horizon_hold(horizon=48, cost_stress=1.0)
+  id=769376c9f4686bc4  gen=149  by=evo_mutate  nodes=8
+```
+**#17 · `55b80bbeb1b15234` — DSR-z 2.38 · died at `G8_orthogonality` · families: macro, oscillator, pattern, positioning, statistical, volatility, volume**
+```
+[fx] gated_or (long_bias) on H4
+  features: cci(window=5); realized_vol(window=16); candlestick_pattern(pattern=pin); variance_ratio(window=43, q=7); rel_volume(window=135); cot_index(window=13)
+  sizing:   rank_bucket(top_frac=0.21, gross=1.0, per_name_cap=0.14029229848303446)
+  risk:     horizon_hold(horizon=48, cost_stress=1.0)
+  id=55b80bbeb1b15234  gen=115  by=evo_mutate  nodes=9
+```
+**#18 · `e41648aa5c632f0e` — DSR-z 2.38 · died at `ADMITTED` · families: auction_market_theory, pattern, statistical, volatility, volume**
+```
+[fx] gated_or (long_bias) on H4
+  features: rotation_factor(window=5); realized_vol(window=16); candlestick_pattern(pattern=pin); variance_ratio(window=43, q=7); rel_volume(window=135)
+  sizing:   rank_bucket(top_frac=0.21, gross=1.0, per_name_cap=0.09511358859730075)
+  risk:     horizon_hold(horizon=48, cost_stress=1.0)
+  id=e41648aa5c632f0e  gen=315  by=evo_mutate  nodes=8
+```
+**#19 · `1910a2f4ddd61623` — DSR-z 2.38 · died at `ADMITTED` · families: macro, oscillator, pattern, sentiment, statistical, volatility, volume**
+```
+[fx] gated_or (long_bias) on H4
+  features: cci(window=5); realized_vol(window=16); candlestick_pattern(pattern=pin); variance_ratio(window=43, q=7); rel_volume(window=135); news_sentiment(window=11)
+  sizing:   rank_bucket(top_frac=0.21, gross=0.8824190586852465, per_name_cap=0.1488698459729555)
+  risk:     horizon_hold(horizon=48, cost_stress=1.0)
+  id=1910a2f4ddd61623  gen=260  by=evo_mutate  nodes=9
+```
+**#20 · `62dce1e8bc85b432` — DSR-z 2.37 · died at `ADMITTED` · families: oscillator, pattern, statistical, volatility, volume**
+```
+[fx] gated_or (long_bias) on H4
+  features: cci(window=5); realized_vol(window=16); candlestick_pattern(pattern=pin); variance_ratio(window=43, q=7); rel_volume(window=135)
+  sizing:   rank_bucket(top_frac=0.21, gross=1.0, per_name_cap=0.10667879121072119)
+  risk:     horizon_hold(horizon=48, cost_stress=1.0)
+  id=62dce1e8bc85b432  gen=175  by=evo_mutate  nodes=8
 ```
 </details>
 
@@ -216,14 +216,14 @@ Each candidate is killed by the **first** gate it fails. Cheap gates run first.
 
 | gate | genomes killed | share | what it means |
 |---|---:|---:|---|
-| `G4_deflated_sharpe` | 71,878 | 45.4% | edge indistinguishable from luck after trial correction |
-| `G1_sanity` | 46,146 | 29.1% | degenerate / too few periods, or one period dominates P&L |
-| `G0_eval` | 19,441 | 12.3% | did not produce a valid backtest |
-| `GS_screen` | 15,463 | 9.8% | — |
-| `ADMITTED` | 3,631 | 2.3% | **cleared every gate** |
-| `G3_cpcv_pbo` | 1,753 | 1.1% | parameter tuning overfit (high PBO) |
-| `G8_orthogonality` | 147 | 0.1% | duplicates an existing archive member |
-| `G2_oos` | 6 | 0.0% | shines in-sample, decays out-of-sample |
+| `G4_deflated_sharpe` | 71,878 | 33.1% | edge indistinguishable from luck after trial correction |
+| `G1_sanity` | 54,746 | 25.2% | degenerate / too few periods, or one period dominates P&L |
+| `GS_screen` | 37,792 | 17.4% | — |
+| `ADMITTED` | 22,052 | 10.2% | **cleared every gate** |
+| `G0_eval` | 19,638 | 9.0% | did not produce a valid backtest |
+| `G3_cpcv_pbo` | 10,333 | 4.8% | parameter tuning overfit (high PBO) |
+| `G8_orthogonality` | 529 | 0.2% | duplicates an existing archive member |
+| `G2_oos` | 130 | 0.1% | shines in-sample, decays out-of-sample |
 
 ---
 
@@ -236,16 +236,16 @@ Each candidate is killed by the **first** gate it fails. Cheap gates run first.
 
 | market | genomes | admitted | best DSR-z | vs bar (1.645) |
 |---|---:|---:|---:|---|
-| `crypto` | 53298 | 1524 | 2.35 | ██████████████████ |
-| `fx` | 53264 | 304 | 0.97 | ███████████······· |
-| `xau` | 51903 | 1803 | 0.26 | ███··············· |
+| `fx` | 71750 | 4590 | 2.71 | ██████████████████ |
+| `crypto` | 74087 | 9817 | 2.41 | ██████████████████ |
+| `xau` | 71261 | 7645 | 0.26 | ███··············· |
 
 ### 4.2 By phenotype
 **Execution style**
 
 | phenotype | genomes | admitted | best DSR-z | vs bar (1.645) |
 |---|---:|---:|---:|---|
-| `cross_sectional` | 137539 | 3631 | 2.35 | ██████████████████ |
+| `cross_sectional` | 196172 | 22052 | 2.71 | ██████████████████ |
 | `directional` | 20926 | 0 | -0.10 | ·················· |
 
 ### 4.3 By generation engine
@@ -253,8 +253,8 @@ Each candidate is killed by the **first** gate it fails. Cheap gates run first.
 
 | engine | genomes | admitted | best DSR-z | vs bar (1.645) |
 |---|---:|---:|---:|---|
-| `evo` | 81830 | 3626 | 2.35 | ██████████████████ |
-| `llm` | 1314 | 2 | -0.07 | ·················· |
+| `evo` | 140463 | 22048 | 2.71 | ██████████████████ |
+| `llm` | 1314 | 1 | -0.07 | ·················· |
 | `random` | 35303 | 0 | -0.10 | ·················· |
 | `template` | 28248 | 1 | -0.87 | ·················· |
 | `miner` | 11770 | 2 | -1.53 | ·················· |
@@ -264,19 +264,19 @@ Each candidate is killed by the **first** gate it fails. Cheap gates run first.
 
 | regime | genomes | admitted | best DSR-z | vs bar (1.645) |
 |---|---:|---:|---:|---|
-| `all` | 52562 | 1614 | 2.35 | ██████████████████ |
-| `low_vol` | 29969 | 10 | 0.87 | ██████████········ |
-| `trend` | 29521 | 9 | 0.73 | ████████·········· |
-| `chop` | 26758 | 1992 | 0.26 | ███··············· |
-| `high_vol` | 19655 | 6 | 0.26 | ███··············· |
+| `all` | 84582 | 13312 | 2.71 | ██████████████████ |
+| `low_vol` | 30593 | 75 | 1.02 | ███████████······· |
+| `trend` | 30094 | 66 | 0.73 | ████████·········· |
+| `chop` | 45828 | 7714 | 0.26 | ███··············· |
+| `high_vol` | 26001 | 885 | 0.26 | ███··············· |
 
 ### 4.5 By position sizing
 **Sizing**
 
 | sizing op | genomes | admitted | best DSR-z | vs bar (1.645) |
 |---|---:|---:|---:|---|
-| `rank_bucket` | 98811 | 3437 | 2.35 | ██████████████████ |
-| `vol_target` | 29185 | 185 | 0.97 | ███████████······· |
+| `rank_bucket` | 156331 | 21864 | 2.71 | ██████████████████ |
+| `vol_target` | 30298 | 179 | 0.97 | ███████████······· |
 | `fixed_fractional` | 13979 | 0 | -0.10 | ·················· |
 | `atr_scaled` | 6930 | 0 | -1.32 | ·················· |
 | `kelly_fraction` | 9560 | 9 | -1.38 | ·················· |
@@ -286,33 +286,33 @@ Each candidate is killed by the **first** gate it fails. Cheap gates run first.
 
 | family | genomes | admitted | best DSR-z | vs bar (1.645) |
 |---|---:|---:|---:|---|
-| `volatility` | 31298 | 1820 | 2.35 | ██████████████████ |
-| `pattern` | 17281 | 2184 | 2.35 | ██████████████████ |
-| `breakout` | 12237 | 1492 | 2.35 | ██████████████████ |
-| `microstructure` | 12165 | 1308 | 2.35 | ██████████████████ |
-| `liquidity` | 8168 | 1285 | 2.35 | ██████████████████ |
-| `trend` | 21402 | 2122 | 1.71 | ██████████████████ |
-| `auction_market_theory` | 28263 | 1883 | 1.70 | ██████████████████ |
-| `volume` | 14851 | 815 | 1.70 | ██████████████████ |
-| `volume_profile` | 7069 | 1194 | 1.63 | ██████████████████ |
-| `momentum` | 28010 | 1870 | 1.37 | ███████████████··· |
-| `order_flow` | 11152 | 548 | 1.21 | █████████████····· |
-| `market_profile` | 9336 | 245 | 1.11 | ████████████······ |
-| `statistical` | 26008 | 1302 | 1.09 | ████████████······ |
-| `oscillator` | 20277 | 1175 | 1.04 | ███████████······· |
-| `macro` | 17424 | 473 | 0.97 | ███████████······· |
-| `sentiment` | 8732 | 194 | 0.97 | ███████████······· |
-| `ict` | 4317 | 580 | 0.26 | ███··············· |
-| `smc` | 4317 | 580 | 0.26 | ███··············· |
-| `event` | 3683 | 279 | 0.25 | ███··············· |
-| `calendar` | 1759 | 227 | 0.25 | ███··············· |
-| `rates` | 5253 | 52 | 0.18 | ██················ |
-| `mean_reversion` | 12965 | 292 | -0.07 | ·················· |
-| `cross_asset` | 1865 | 5 | -0.07 | ·················· |
-| `positioning` | 1934 | 8 | -0.20 | ·················· |
-| `persistence` | 3283 | 26 | -0.85 | ·················· |
+| `volatility` | 52916 | 11241 | 2.71 | ██████████████████ |
+| `statistical` | 45695 | 8213 | 2.71 | ██████████████████ |
+| `trend` | 45442 | 11769 | 2.71 | ██████████████████ |
+| `momentum` | 44729 | 7915 | 2.71 | ██████████████████ |
+| `pattern` | 36530 | 10767 | 2.71 | ██████████████████ |
+| `oscillator` | 31267 | 4484 | 2.71 | ██████████████████ |
+| `macro` | 29150 | 4154 | 2.43 | ██████████████████ |
+| `volume` | 27918 | 5654 | 2.43 | ██████████████████ |
+| `sentiment` | 13172 | 1638 | 2.43 | ██████████████████ |
+| `microstructure` | 24582 | 7828 | 2.41 | ██████████████████ |
+| `breakout` | 20349 | 5904 | 2.41 | ██████████████████ |
+| `liquidity` | 19941 | 7733 | 2.41 | ██████████████████ |
+| `positioning` | 4434 | 562 | 2.38 | ██████████████████ |
+| `auction_market_theory` | 44264 | 6963 | 2.38 | ██████████████████ |
+| `mean_reversion` | 14716 | 892 | 1.70 | ██████████████████ |
+| `cross_asset` | 2599 | 207 | 1.70 | ██████████████████ |
+| `volume_profile` | 10291 | 2436 | 1.63 | ██████████████████ |
+| `order_flow` | 14388 | 1602 | 1.21 | █████████████····· |
+| `market_profile` | 12877 | 1248 | 1.11 | ████████████······ |
+| `ict` | 8338 | 1969 | 0.26 | ███··············· |
+| `smc` | 8338 | 1969 | 0.26 | ███··············· |
+| `event` | 9072 | 2249 | 0.25 | ███··············· |
+| `calendar` | 3516 | 834 | 0.25 | ███··············· |
+| `rates` | 9959 | 1788 | 0.18 | ██················ |
+| `persistence` | 3604 | 125 | -0.85 | ·················· |
 | `regime` | 5875 | 0 | -1.33 | ·················· |
-| `mixed` | 35575 | 0 | -2.42 | ·················· |
+| `mixed` | 36189 | 100 | -1.71 | ·················· |
 | `ml_derived` | 2564 | 0 | -2.45 | ·················· |
 | `intermarket` | 1109 | 0 | -2.67 | ·················· |
 | `crypto` | 848 | 0 | -3.10 | ·················· |
@@ -328,69 +328,69 @@ Each candidate is killed by the **first** gate it fails. Cheap gates run first.
 |---|---:|---:|---|
 | `delta_divergence` | 2 | +6.129 | **carries signal** |
 | `intx_28e8ed9a` | 2 | +2.857 | **carries signal** |
-| `amihud_illiquidity` | 5772 | +0.896 | **carries signal** |
-| `momentum` | 2127 | +0.805 | **carries signal** |
-| `atr_expansion` | 4868 | +0.699 | **carries signal** |
-| `rotation_factor` | 1495 | +0.596 | **carries signal** |
-| `tsmom_blend` | 3104 | +0.521 | **carries signal** |
-| `macd` | 2473 | +0.487 | **carries signal** |
+| `amihud_illiquidity` | 32609 | +0.974 | **carries signal** |
+| `atr_expansion` | 19832 | +0.966 | **carries signal** |
+| `autocorr` | 8129 | +0.713 | **carries signal** |
+| `rel_volume` | 9086 | +0.698 | **carries signal** |
+| `variance_ratio` | 14038 | +0.693 | **carries signal** |
+| `tsmom_blend` | 12610 | +0.466 | **carries signal** |
+| `breakout` | 17431 | +0.442 | **carries signal** |
 | `williams_r` | 2 | +0.436 | **carries signal** |
-| `order_block_strength` | 509 | +0.386 | **carries signal** |
-| `news_sentiment` | 2173 | +0.327 | **carries signal** |
-| `breakout` | 5316 | +0.271 | **carries signal** |
-| `fed_repricing` | 137 | +0.224 | **carries signal** |
-| `fvg_gap` | 1206 | +0.204 | **carries signal** |
-| `adx` | 1484 | +0.186 | **carries signal** |
+| `candlestick_pattern` | 24249 | +0.383 | **carries signal** |
+| `realized_vol` | 11019 | +0.377 | **carries signal** |
+| `ma_cross` | 11345 | +0.265 | **carries signal** |
+| `momentum` | 4735 | +0.247 | **carries signal** |
+| `cci` | 7574 | +0.207 | **carries signal** |
 
 ---
 
-## 5 · Archive (26 niches)
+## 5 · Archive (34 niches)
 
 | niche | market | fitness |
 |---|---|---:|
+| `fx:position:low:long:all` | fx | 1.388 |
+| `fx:position:med:long:all` | fx | 1.314 |
 | `xau:swing:low:long:chop` | xau | 0.848 |
-| `crypto:position:med:neutral:all` | crypto | 0.657 |
-| `crypto:position:high:neutral:all` | crypto | 0.596 |
-| `xau:swing:low:neutral:chop` | xau | 0.485 |
+| `xau:swing:low:neutral:chop` | xau | 0.757 |
+| `crypto:position:med:neutral:all` | crypto | 0.679 |
+| `crypto:position:high:neutral:all` | crypto | 0.660 |
+| `crypto:position:med:neutral:high_vol` | crypto | 0.432 |
+| `crypto:position:med:neutral:low_vol` | crypto | 0.404 |
 | `crypto:position:high:neutral:low_vol` | crypto | 0.402 |
+| `xau:swing:low:long:high_vol` | xau | 0.374 |
+| `xau:swing:low:long:trend` | xau | 0.366 |
+| `crypto:position:med:neutral:chop` | crypto | 0.361 |
 | `crypto:position:low:neutral:all` | crypto | 0.352 |
 | `fx:position:low:neutral:all` | fx | 0.334 |
-| `crypto:position:med:neutral:low_vol` | crypto | 0.297 |
-| `crypto:position:med:neutral:trend` | crypto | 0.270 |
-| `crypto:position:med:neutral:high_vol` | crypto | 0.263 |
-| `crypto:position:med:neutral:chop` | crypto | 0.223 |
+| `crypto:position:low:neutral:high_vol` | crypto | 0.334 |
+| `crypto:position:med:neutral:trend` | crypto | 0.320 |
+| `xau:swing:low:long:all` | xau | 0.240 |
 | `xau:intraday:low:neutral:chop` | xau | 0.221 |
-| `xau:swing:low:long:high_vol` | xau | 0.220 |
 | `fx:intraday:low:long:chop` | fx | 0.155 |
 | `crypto:swing:med:neutral:all` | crypto | 0.133 |
+| `xau:position:low:long:chop` | xau | 0.111 |
 | `crypto:swing:med:long:chop` | crypto | 0.092 |
+| `crypto:position:high:neutral:trend` | crypto | 0.089 |
 | `xau:intraday:low:long:chop` | xau | 0.075 |
-| `crypto:swing:low:neutral:all` | crypto | 0.026 |
-| `crypto:swing:high:neutral:all` | crypto | -0.016 |
-| `xau:intraday:low:neutral:all` | xau | -0.022 |
-| `crypto:intraday:low:neutral:all` | crypto | -0.030 |
-| `xau:position:low:long:chop` | xau | -0.054 |
-| `crypto:swing:med:neutral:low_vol` | crypto | -0.075 |
-| `xau:intraday:trade:long:chop` | xau | -0.097 |
-| `crypto:intraday:med:neutral:all` | crypto | -0.213 |
+| `xau:swing:low:neutral:all` | xau | 0.044 |
 
-## 6 · Lessons library (18,906)
+## 6 · Lessons library (56,773)
 
-- ×13 — [GS_screen] breakout+macro+momentum+oscillator+pattern+sentiment+statistical+trend+volatility+volume (cross_sectional) — r
-- ×10 — [PASS] momentum+oscillator+pattern+statistical+trend+volatility on a cross_sectional book promoted to the candidate p
-- ×7 — [PASS] macro+momentum+pattern+sentiment+statistical+trend+volatility+volume on a cross_sectional book promoted to the
-- ×6 — [PASS] auction_market_theory+macro+momentum+oscillator+pattern+sentiment+statistical+trend+volume_profile on a cross_
-- ×5 — [PASS] auction_market_theory+breakout+liquidity+market_profile+microstructure+pattern+volatility+volume_profile on a 
-- ×5 — [GS_screen] liquidity+microstructure (cross_sectional) — raw predictive strength too weak to clear the FDR screen [p_singl
-- ×5 — [PASS] momentum+oscillator on a cross_sectional book promoted to the candidate pool
-- ×4 — [GS_screen] mean_reversion+statistical+volatility (cross_sectional) — raw predictive strength too weak to clear the FDR sc
-- ×4 — [PASS] statistical on a cross_sectional book promoted to the candidate pool
-- ×4 — [PASS] macro+momentum+pattern+sentiment+trend+volatility+volume on a cross_sectional book promoted to the candidate p
-- ×4 — [PASS] breakout+liquidity+microstructure+pattern+volatility on a cross_sectional book promoted to the candidate pool
-- ×4 — [PASS] breakout+liquidity+microstructure+momentum+pattern+trend on a cross_sectional book promoted to the candidate p
-- ×4 — [PASS] auction_market_theory+trend+volatility+volume_profile on a cross_sectional book promoted to the candidate pool
-- ×4 — [PASS] momentum+oscillator+statistical on a cross_sectional book promoted to the candidate pool
-- ×4 — [GS_screen] macro+momentum+oscillator+pattern+sentiment+statistical+trend+volatility+volume (cross_sectional) — raw predic
+- ×11 — [PASS] statistical on a cross_sectional book promoted to the candidate pool
+- ×11 — [PASS] auction_market_theory+liquidity+microstructure+volatility+volume on a cross_sectional book promoted to the can
+- ×11 — [PASS] liquidity+microstructure+momentum+trend+volatility on a cross_sectional book promoted to the candidate pool
+- ×11 — [PASS] breakout+liquidity+microstructure+momentum+pattern+trend+volatility on a cross_sectional book promoted to the 
+- ×7 — [PASS] auction_market_theory+market_profile+volatility on a cross_sectional book promoted to the candidate pool
+- ×7 — [PASS] statistical+volatility on a cross_sectional book promoted to the candidate pool
+- ×7 — [PASS] liquidity+microstructure+momentum+trend+volatility+volume on a cross_sectional book promoted to the candidate 
+- ×6 — [PASS] interaction+mined+obv+range_vol+statistical+trend+volatility on a cross_sectional book promoted to the candida
+- ×6 — [GS_screen] auction_market_theory+volume (cross_sectional) — raw predictive strength too weak to clear the FDR screen [p_s
+- ×6 — [G3_cpcv_pbo] liquidity+microstructure+momentum+trend+volatility (cross_sectional) — parameter tuning is overfit (high PBO) 
+- ×6 — [GS_screen] event+macro+pattern+rates+trend (cross_sectional) — raw predictive strength too weak to clear the FDR screen [
+- ×6 — [GS_screen] momentum+oscillator+trend (cross_sectional) — raw predictive strength too weak to clear the FDR screen [p_sing
+- ×4 — [PASS] liquidity+microstructure+trend on a cross_sectional book promoted to the candidate pool
+- ×4 — [PASS] volatility on a cross_sectional book promoted to the candidate pool
+- ×4 — [PASS] liquidity+microstructure+momentum+oscillator+trend+volatility on a cross_sectional book promoted to the candid
 
 ---
 
