@@ -101,6 +101,13 @@ CREATE TABLE IF NOT EXISTS minted_ops (
 -- Stage-A → Stage-B boundary. A finalist list is content-hashed and timestamped BEFORE the
 -- holdout is touched; Stage B may only ever confirm a list that already exists here. This is the
 -- artifact that makes "we did not redraw the finalists after peeking" checkable (docs/15 §4).
+-- Monotonic all-time counters. The Deflated-Sharpe family size N must survive retention: if it
+-- were recomputed from surviving ledger rows, pruning would lower the significance bar for every
+-- future candidate — manufacturing significance by forgetting trials that were already paid for.
+CREATE TABLE IF NOT EXISTS counters (
+    k TEXT PRIMARY KEY,
+    v INTEGER NOT NULL DEFAULT 0
+);
 CREATE TABLE IF NOT EXISTS preregistration (
     prereg_id   INTEGER PRIMARY KEY AUTOINCREMENT,
     market      TEXT,
@@ -304,6 +311,7 @@ class MTStore:
              row["hit_rate"], row["avg_turnover"], row["error"], row.get("ret_sig", ""), time.time()),
         )
         self.conn.commit()
+        self.bump_trials(res.market, 1)          # all-time N, immune to retention
         return cur.lastrowid, True
 
     def avg_trial_corr(self, market: Optional[str] = None, sample: int = 400) -> Optional[float]:
@@ -334,12 +342,21 @@ class MTStore:
         rho = float(np.nanmean(C[iu]))                    # signed: positive co-movement reduces independence
         return None if not np.isfinite(rho) else float(min(max(rho, 0.0), 0.99))
 
-    def trial_signatures(self, market: Optional[str] = None, sample: int = 400) -> List:
-        """The most recent parsed P&L-path signatures — raw material for K_eff."""
+    def trial_signatures(self, market: Optional[str] = None, sample: int = 400,
+                         genome_ids: Optional[List[str]] = None) -> List:
+        """The most recent parsed P&L-path signatures — raw material for K_eff.
+
+        `genome_ids` restricts the sample to a named set. Stage B needs this: the confirmatory
+        family must be deflated by how correlated the FINALISTS are with each other, not by how
+        correlated the market's general trial population is (docs/15 §4)."""
         q = "SELECT ret_sig FROM result_ledger WHERE ret_sig IS NOT NULL AND ret_sig!=''"
         params: tuple = ()
         if market:
             q += " AND market=?"; params = (market,)
+        if genome_ids:
+            ids = list(dict.fromkeys(genome_ids))       # de-dup, order-stable
+            q += " AND genome_id IN (%s)" % ",".join("?" * len(ids))
+            params = params + tuple(ids)
         q += " ORDER BY eval_id DESC LIMIT ?"
         import numpy as np
         out = []
@@ -568,11 +585,21 @@ class MTStore:
             self.conn.execute("INSERT INTO screening_ledger(market,n,kind,created_at) VALUES(?,?,?,?)",
                               (market, int(n), kind, time.time()))
             self.conn.commit()
+            self.bump_trials(market, int(n))      # all-time N, immune to retention
 
     def trial_count(self, market: Optional[str] = None) -> int:
         """The Deflated-Sharpe family size N: every eval ever recorded PLUS hidden screening
         trials (docs/05 §3). Both counts are scoped the same way as the σ_SR dispersion the DSR
-        pairs with — per-market when a market is given — so N and σ_SR describe one trial set."""
+        pairs with — per-market when a market is given — so N and σ_SR describe one trial set.
+
+        N is the MONOTONIC counter, never a live COUNT(*) alone. Retention prunes old ledger rows
+        to keep the brain a workable size, and if N were derived from surviving rows then pruning
+        would silently shrink the family and lower the significance bar for every future candidate
+        — buying "significance" by forgetting the trials that were paid for. `trial_counter` holds
+        the all-time total; the row count is only a floor for a brain written before it existed."""
+        key = f"trials:{market}" if market else "trials:*"
+        row = self.conn.execute("SELECT v FROM counters WHERE k=?", (key,)).fetchone()
+        counted = int(row["v"]) if row else 0
         if market:
             n_eval = self.conn.execute("SELECT COUNT(*) FROM result_ledger WHERE market=?", (market,)).fetchone()[0]
             n_scr = self.conn.execute("SELECT COALESCE(SUM(n),0) FROM screening_ledger WHERE market=?",
@@ -580,7 +607,96 @@ class MTStore:
         else:
             n_eval = self.conn.execute("SELECT COUNT(*) FROM result_ledger").fetchone()[0]
             n_scr = self.conn.execute("SELECT COALESCE(SUM(n),0) FROM screening_ledger").fetchone()[0]
-        return int(n_eval) + int(n_scr)
+        return max(counted, int(n_eval) + int(n_scr))
+
+    def bump_trials(self, market: Optional[str], n: int = 1) -> None:
+        """Advance the monotonic trial counter (all-time N), per market and globally."""
+        if n <= 0:
+            return
+        for key in ({f"trials:{market}", "trials:*"} if market else {"trials:*"}):
+            self.conn.execute(
+                "INSERT INTO counters(k,v) VALUES(?,?) ON CONFLICT(k) DO UPDATE SET v=v+?",
+                (key, int(n), int(n)))
+        self.conn.commit()
+
+    def backfill_counters(self) -> None:
+        """One-time: seed the monotonic counters from the rows an existing brain already holds, so
+        migrating a pre-retention database cannot momentarily drop N."""
+        if self.conn.execute("SELECT 1 FROM counters WHERE k='trials:*'").fetchone():
+            return
+        markets = [r[0] for r in self.conn.execute("SELECT DISTINCT market FROM result_ledger")]
+        total = 0
+        for m in markets:
+            n = self.conn.execute("SELECT COUNT(*) FROM result_ledger WHERE market=?", (m,)).fetchone()[0]
+            s = self.conn.execute("SELECT COALESCE(SUM(n),0) FROM screening_ledger WHERE market=?",
+                                  (m,)).fetchone()[0]
+            self.conn.execute("INSERT OR REPLACE INTO counters(k,v) VALUES(?,?)",
+                              (f"trials:{m}", int(n) + int(s)))
+            total += int(n) + int(s)
+        self.conn.execute("INSERT OR REPLACE INTO counters(k,v) VALUES('trials:*',?)", (int(total),))
+        self.conn.commit()
+
+    # ─── retention: keep the brain a workable size ───────────────────────
+    def prune(self, keep_reports: int = 40000, keep_hof: int = 3000,
+              keep_ledger: int = 120000) -> dict:
+        """Bound the three tables that dominate the file, WITHOUT losing anything load-bearing.
+
+        Measured on the 2026-07-28 production brain (528 MB raw, growing ~30 MB compressed per
+        marathon): gauntlet_reports 248k rows ≈158 MB, genomes 158k ≈145 MB, result_ledger 238k
+        ≈62 MB, hall_of_fame 92,879 rows ≈36 MB. `gauntlet_reports` is read only for COUNT(*) and
+        a one-time hall-of-fame backfill, and `hall_of_fame` had no cap at all — it was a copy of
+        every promoted genome rather than a hall of fame.
+
+        Anything referenced by the archive, a champion, a book, a pre-registration or the retained
+        hall-of-fame is kept in full: those are the objects warm-start, G8 and Stage B read back."""
+        protected = set()
+        for q in ("SELECT genome_id FROM archive",
+                  "SELECT genome_id FROM champion_track",
+                  "SELECT genome_id FROM holdout_ledger"):
+            try:
+                protected.update(r[0] for r in self.conn.execute(q))
+            except Exception:
+                pass
+        try:
+            for (members,) in self.conn.execute("SELECT members FROM book_track"):
+                protected.update(json.loads(members or "[]"))
+        except Exception:
+            pass
+        before = self._page_bytes()
+
+        # hall of fame: keep the best of each ordering the selectors actually use
+        for col in ("dsr_z", "curiosity", "edge_t"):
+            for (m,) in self.conn.execute("SELECT DISTINCT market FROM hall_of_fame"):
+                protected.update(r[0] for r in self.conn.execute(
+                    f"SELECT genome_id FROM hall_of_fame WHERE market=? "
+                    f"ORDER BY COALESCE({col},-1e18) DESC LIMIT ?", (m, keep_hof)))
+        ph = ",".join("?" * len(protected)) if protected else "''"
+        args = tuple(protected)
+        n_hof = self.conn.execute(
+            f"DELETE FROM hall_of_fame WHERE genome_id NOT IN ({ph})", args).rowcount
+        n_rep = self.conn.execute(
+            f"DELETE FROM gauntlet_reports WHERE genome_id NOT IN ({ph}) AND report_id NOT IN "
+            f"(SELECT report_id FROM gauntlet_reports ORDER BY report_id DESC LIMIT ?)",
+            args + (keep_reports,)).rowcount
+        n_led = self.conn.execute(
+            f"DELETE FROM result_ledger WHERE genome_id NOT IN ({ph}) AND eval_id NOT IN "
+            f"(SELECT eval_id FROM result_ledger ORDER BY eval_id DESC LIMIT ?)",
+            args + (keep_ledger,)).rowcount
+        n_gen = self.conn.execute(
+            f"DELETE FROM genomes WHERE genome_id NOT IN ({ph}) AND genome_id NOT IN "
+            f"(SELECT genome_id FROM result_ledger)", args).rowcount
+        self.conn.commit()
+        self.conn.execute("VACUUM")
+        return {"hall_of_fame": n_hof, "gauntlet_reports": n_rep, "result_ledger": n_led,
+                "genomes": n_gen, "bytes_before": before, "bytes_after": self._page_bytes()}
+
+    def _page_bytes(self) -> int:
+        try:
+            pc = self.conn.execute("PRAGMA page_count").fetchone()[0]
+            ps = self.conn.execute("PRAGMA page_size").fetchone()[0]
+            return int(pc) * int(ps)
+        except Exception:
+            return 0
 
     # ─── Gauntlet reports ────────────────────────────────────────────────
     def record_gauntlet(self, genome_id: str, market: str, passed: bool,

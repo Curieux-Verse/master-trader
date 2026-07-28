@@ -108,6 +108,7 @@ def run(markets, generations, batch_size, seed, source, snapshot_id, structure,
         from mt.run_system import _reset_db
         _reset_db()
     store = MTStore()
+    store.backfill_counters()                # one-time: seed all-time N before any retention runs
     seeded = store.backfill_hof()            # one-time: surface an existing brain's best-ever genomes
     if seeded:
         print(f"  hall-of-fame backfilled from {seeded} historical gauntlet reports "
@@ -176,6 +177,20 @@ def run(markets, generations, batch_size, seed, source, snapshot_id, structure,
 
     _digest(store, markets, z_trend, fam_all, pheno_all, gen, arch, admitted, t0, final=True,
             bandit=loops[markets[0]].bandit.weights(), loops=loops)
+
+    # RETENTION runs last, after the digest and Stage-B confirmation have read everything they
+    # need. The brain reached 528 MB / ~30 MB of compressed growth per marathon, which is what
+    # broke the durable snapshot; N is preserved by the monotonic counter, so pruning cannot
+    # lower the significance bar (see MTStore.prune).
+    try:
+        p = store.prune()
+        if p["bytes_before"] > p["bytes_after"]:
+            print(f"  retention: {p['bytes_before']/1e6:.0f}MB → {p['bytes_after']/1e6:.0f}MB "
+                  f"(hof −{p['hall_of_fame']}, reports −{p['gauntlet_reports']}, "
+                  f"ledger −{p['result_ledger']}, genomes −{p['genomes']}); N preserved at "
+                  f"{store.trial_count()}")
+    except Exception as e:
+        print(f"  retention skipped: {e}")
     store.close()
 
 

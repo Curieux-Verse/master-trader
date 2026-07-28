@@ -77,16 +77,19 @@ jobs:
         run: |
           if [ -f var/mt.db ]; then
             echo "brain restored from cache — durable snapshot not needed"
+          elif gh release download brain-snapshot --pattern mt.db.gz --dir "$RUNNER_TEMP" --clobber 2>/dev/null; then
+            python -m mt.store.snapshot restore --in "$RUNNER_TEMP/mt.db.gz" --db var/mt.db \
+              && echo "brain restored from durable release snapshot (survived cache eviction)" \
+              || echo "durable snapshot present but unreadable — starting a fresh brain"
+          elif git fetch --depth 1 "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" state 2>/dev/null \
+               && git show FETCH_HEAD:mt.db.gz > "$RUNNER_TEMP/mt.db.gz" 2>/dev/null; then
+            # legacy path: the pre-2026-07-29 orphan `state` branch, kept so an old snapshot is
+            # still recoverable until the first release asset is published.
+            python -m mt.store.snapshot restore --in "$RUNNER_TEMP/mt.db.gz" --db var/mt.db \
+              && echo "brain restored from legacy state-branch snapshot" \
+              || echo "legacy snapshot unreadable — starting a fresh brain"
           else
-            echo "brain cache miss — trying durable state-branch snapshot…"
-            if git fetch --depth 1 "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" state 2>/dev/null; then
-              git show FETCH_HEAD:mt.db.gz > "$RUNNER_TEMP/mt.db.gz" 2>/dev/null \
-                && python -m mt.store.snapshot restore --in "$RUNNER_TEMP/mt.db.gz" --db var/mt.db \
-                && echo "brain restored from durable snapshot (survived cache eviction)" \
-                || echo "no usable durable snapshot yet (first run?)"
-            else
-              echo "no 'state' branch yet (first run?) — starting a fresh brain"
-            fi
+            echo "no durable snapshot yet (first run?) — starting a fresh brain"
           fi
 
       - name: Run the marathon
@@ -108,28 +111,28 @@ jobs:
           path: var/mt.db
           key: mtdb-${{ github.run_id }}
 
-      # Push a compressed, integrity-checked snapshot to a single-commit `state` branch (docs/14).
+      # Publish a compressed, integrity-checked snapshot as a RELEASE ASSET (docs/14).
       # This is the durable copy the fallback above restores from — so a >7-day pause can no longer
-      # evict the accumulating brain. Force-push keeps `state` at one commit (no history bloat).
-      - name: Persist durable brain snapshot (state branch)
+      # evict the accumulating brain.
+      #
+      # It used to be a blob on an orphan `state` branch. That broke permanently once the brain
+      # crossed GitHub's 100 MiB per-FILE limit for git pushes: the 2026-07-28 snapshots were
+      # rejected at 133.81 MB and 164.55 MB, which failed the whole job AFTER a full 5h of research
+      # had already completed. Release assets have a 2 GB limit and never enter git history, so the
+      # snapshot can grow with the brain. A single rolling tag is force-updated each run.
+      - name: Persist durable brain snapshot (release asset)
         if: always()
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           [ -f var/mt.db ] || { echo "no brain to snapshot"; exit 0; }
           python -m mt.store.snapshot save --db var/mt.db --out "$RUNNER_TEMP/mt.db.gz"
-          tmp="$RUNNER_TEMP/state"; rm -rf "$tmp"
-          git clone --depth 1 "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "$tmp"
-          cd "$tmp"
-          git checkout --orphan state_new
-          git rm -rf . >/dev/null 2>&1 || true
-          cp "$RUNNER_TEMP/mt.db.gz" mt.db.gz
-          git add mt.db.gz
-          git -c user.name="master-trader-bot" \
-              -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
-              commit -m "state: brain snapshot $(date -u +%FT%TZ) [skip ci]"
-          git push -f origin state_new:state
-          echo "durable snapshot pushed to 'state' branch ($(du -h mt.db.gz | cut -f1))"
+          sz=$(du -h "$RUNNER_TEMP/mt.db.gz" | cut -f1)
+          gh release view brain-snapshot >/dev/null 2>&1 \
+            || gh release create brain-snapshot --title "brain snapshot" --notes "rolling durable snapshot of var/mt.db (see docs/14)" --latest=false
+          gh release upload brain-snapshot "$RUNNER_TEMP/mt.db.gz" --clobber
+          gh release edit brain-snapshot --notes "rolling durable snapshot of var/mt.db — updated $(date -u +%FT%TZ) (${sz})" --latest=false
+          echo "durable snapshot uploaded to release 'brain-snapshot' (${sz})"
 
       - name: Publish research log
         if: always()
@@ -143,4 +146,11 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add runs/
           git commit -m "chore(research-log): marathon digest $(date -u +%FT%TZ) [skip ci]" || echo "nothing to commit"
-          git push || echo "push skipped"
+          # A marathon checks out main at launch and finishes ~5h later, so main has usually moved.
+          # Without the rebase this push fails "fetch first" and the digest is silently lost — which
+          # is why runs/ stopped updating on 2026-07-27 while the research itself was running fine.
+          for attempt in 1 2 3; do
+            git pull --rebase --autostash origin "${GITHUB_REF_NAME}" && git push && { echo "digest published"; break; }
+            echo "digest push attempt ${attempt} failed — retrying"
+            sleep 5
+          done

@@ -18,6 +18,7 @@ import numpy as np
 
 from mt.generators import TemplateSampler
 from mt.genome.schema import Genome, SignalSpec, SizingSpec, RiskSpec
+from mt.genome.registry import REGISTRY
 from mt.sim import evaluate
 from mt.gauntlet import Gauntlet, GauntletContext, GauntletReport
 from mt.gauntlet.runner import STAGE_EXPLORE
@@ -181,7 +182,14 @@ class DiscoveryLoop:
             if report.promoted:
                 outcome = self.archive.insert(g, res, report)
                 if outcome.action in ("occupy", "replace"):
-                    reward = 1.0
+                    # OCCUPYING A NEW NICHE AND BEATING AN INCUMBENT ARE NOT THE SAME ACHIEVEMENT.
+                    # Rewarding both at 1.0 quietly handed the whole budget to `evo`: beating a
+                    # tuned incumbent on raw fitness is something only an evolved child of that
+                    # incumbent can usually do, while opening an unexplored cell is precisely what
+                    # template/random/miner/llm exist for. With one flat reward the exploratory
+                    # engines could never score, and the archive sat at 26 of ~540 cells (4.8%)
+                    # while `evo` refined the same ones. Discovery now pays strictly more.
+                    reward = 1.0 if outcome.action == "occupy" else 0.6
                     self.archive_returns[outcome.niche] = res.net_returns.to_numpy()
                     self.member_returns[g.genome_id] = res.net_returns
                 else:
@@ -283,7 +291,14 @@ class DiscoveryLoop:
             return [self.sampler._archetype(self.market, self._pick_archetype(kinds))
                     for _ in range(cnt)]
         if engine == "random":
-            return [self.sampler._random(self.market) for _ in range(cnt)]
+            # Half blind, half AIMED AT AN EMPTY CELL. Blind sampling kept re-landing in the same
+            # few niches: the production archive held 26 of ~540 reachable cells (4.8%) with the
+            # `short` exposure bucket empty in every market, so QD-score sat flat at +9.11 while
+            # the search reported 26k "admissions" that were all replacements of the same
+            # incumbents. Goal-switching toward unoccupied cells is the standard MAP-Elites answer.
+            aimed = cnt // 2
+            return ([self._targeted(self.market) for _ in range(aimed)] +
+                    [self.sampler._random(self.market) for _ in range(cnt - aimed)])
         if engine == "evo":
             if self.parents:
                 kids = nsga2.breed([g for g, _ in self.parents], cnt, self.rng,
@@ -300,6 +315,47 @@ class DiscoveryLoop:
                 out.append(self.sampler._random(self.market))
             return out
         return [self.sampler._random(self.market) for _ in range(cnt)]
+
+    # ─── quality-diversity: aim at cells nobody has occupied ────────────────
+    HOLD_HORIZON = {"scalp": (1, 2), "intraday": (3, 6), "swing": (7, 24), "position": (25, 48)}
+    REGIMES = ("all", "low_vol", "high_vol", "trend", "chop")
+    EXPOSURE_DIR = {"long": "long_bias", "short": "short_bias", "neutral": "neutral"}
+
+    def _empty_cells(self) -> List[tuple]:
+        """Reachable (hold, exposure, regime) combinations with no archive incumbent.
+
+        Turnover is deliberately excluded: it emerges from the backtest and cannot be dialled in at
+        generation time, so targeting it would just be noise. The other three axes are all direct
+        genome arguments, which is what makes this emitter actually steerable."""
+        occupied = set()
+        for r in self.store.archive_rows(self.market):
+            parts = str(r["niche_key"]).split(":")
+            if len(parts) >= 5:
+                occupied.add((parts[1], parts[3], parts[4]))     # hold, exposure, regime
+        return [(h, e, g) for h in self.HOLD_HORIZON for e in self.EXPOSURE_DIR
+                for g in self.REGIMES if (h, e, g) not in occupied]
+
+    def _targeted(self, market: str) -> Genome:
+        """A random genome steered toward an unoccupied behavioural cell."""
+        empty = self._empty_cells()
+        g = self.sampler._random(market)
+        if not empty:
+            return g
+        hold, expo, regime = empty[int(self.rng.integers(len(empty)))]
+        lo, hi = self.HOLD_HORIZON[hold]
+        try:
+            if g.risk.op == "horizon_hold":
+                g.risk.args["horizon"] = int(self.rng.integers(lo, hi + 1))
+            if "regime" in g.signal.args:
+                g.signal.args["regime"] = regime
+            if "direction" in g.signal.args:
+                want = self.EXPOSURE_DIR[expo]
+                allowed = REGISTRY[g.signal.op].args["direction"].choices
+                if want in allowed:
+                    g.signal.args["direction"] = want
+        except Exception:
+            return self.sampler._random(market)
+        return g if g.typecheck()[0] else self.sampler._random(market)
 
     def build_book(self, n_books_tried: Optional[int] = None) -> Optional[dict]:
         """Assemble and test the PORTFOLIO of archive elites (docs/15 §5).

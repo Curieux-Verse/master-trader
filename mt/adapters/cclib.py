@@ -12,7 +12,7 @@ Every re-export has a pure local fallback so mt still runs (degraded) if CC_Trad
 from __future__ import annotations
 
 import sys
-from typing import List
+from typing import List, Optional
 
 import numpy as np
 
@@ -176,8 +176,30 @@ except Exception:  # pragma: no cover
 DSR_RELIABLE_N_MAX = 5
 
 
+def sharpe_std_error(returns: List[float]) -> Optional[float]:
+    """Standard error of the per-observation Sharpe (Mertens/Bailey, skew+kurtosis adjusted).
+
+    This is the null sampling spread of a Sharpe estimated on THIS series, ≈1/√T. It is the
+    statistically correct dispersion for a max-statistic computed on data that played no part in
+    selection (Stage B), and it is the floor below which the pooled ledger σ_SR must never be
+    trusted (Stage A) — see `deflated_sharpe(sigma_floor=…)`."""
+    from scipy.stats import skew, kurtosis
+    r = np.asarray([float(x) for x in returns if np.isfinite(x)], dtype=float)
+    T = len(r)
+    if T < 10:
+        return None
+    sigma = float(r.std(ddof=1))
+    if sigma < 1e-12:
+        return None
+    sr = float(r.mean()) / sigma
+    if not np.isfinite(sr) or abs(sr) > MAX_SANE_SR_PP:
+        return None
+    s = float(skew(r)); g4 = float(kurtosis(r, fisher=True)) + 3.0
+    return float(np.sqrt(max(1e-12, (1.0 - s * sr + ((g4 - 1.0) / 4.0) * sr ** 2) / (T - 1))))
+
+
 def deflated_sharpe(returns: List[float], n_trials: int, annualization_factor: float = 365.0,
-                    sr_trial_std: float = None) -> dict:
+                    sr_trial_std: float = None, sigma_floor: bool = False) -> dict:
     """Correct Deflated Sharpe — the multiple-testing firewall (docs/05 G4).
 
     `n_trials` is the honest family size from the Result Ledger; `sr_trial_std` is the std of
@@ -205,6 +227,16 @@ def deflated_sharpe(returns: List[float], n_trials: int, annualization_factor: f
     sr_se = float(np.sqrt(max(1e-12, (1.0 - s * sr + ((g4 - 1.0) / 4.0) * sr ** 2) / (T - 1))))
     have_ledger_sigma = bool(sr_trial_std and sr_trial_std > 0)
     sigma_sr = float(sr_trial_std) if have_ledger_sigma else sr_se
+    # T-AWARENESS. The ledger's σ_SR is pooled over trials whose horizons differ by an order of
+    # magnitude, and T = bars/horizon — measured spread within one candidate pool: 27 … 2066
+    # observations. The null sampling sd of a Sharpe is 1/√T, so a single pooled σ_SR is right at
+    # one horizon and wrong at every other; where it falls BELOW this candidate's own sampling
+    # error it under-deflates, which is how an in-sample best-z of +2.7 turns into a negative
+    # out-of-sample z. Never deflate by less than the candidate's own standard error.
+    sigma_floored = False
+    if sigma_floor and have_ledger_sigma and sigma_sr < sr_se:
+        sigma_sr = sr_se
+        sigma_floored = True
 
     N = max(1, int(n_trials))
     if N > 1:                                          # Bailey & López de Prado E[max SR]
@@ -224,7 +256,9 @@ def deflated_sharpe(returns: List[float], n_trials: int, annualization_factor: f
         "n_returns": int(T), "raw_sharpe": round(sr, 5),
         "sr_annualized": round(sr * float(np.sqrt(min(T, annualization_factor))), 5),
         "skewness": round(s, 5), "excess_kurtosis": round(ek, 5), "sr_std_error": round(sr_se, 6),
-        "sigma_sr": round(sigma_sr, 6), "sigma_sr_source": "ledger" if have_ledger_sigma else "fallback",
+        "sigma_sr": round(sigma_sr, 6),
+        "sigma_sr_source": ("sr_se_floor" if sigma_floored else
+                            ("ledger" if have_ledger_sigma else "fallback")),
         "n_trials": N, "expected_max_sr": round(e_max, 5), "reliable": reliable,
         "deflated_sharpe": round(dsr, 5), "dsr_z_score": round(z, 5), "dsr_pvalue": round(dsr_pvalue, 5),
         "is_significant": bool(dsr_pvalue < 0.05 and reliable), "haircut_pct": round(haircut, 2),
