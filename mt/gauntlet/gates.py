@@ -91,9 +91,9 @@ def g2_oos_degradation(net: pd.Series) -> GateResult:
 
 # ── G4 Deflated Sharpe (multiple-testing firewall) ─────────────────────────
 def g4_deflated_sharpe(net: pd.Series, trial_count: int, ann_factor: float = 365.0,
-                       sr_trial_std: float = None) -> GateResult:
+                       sr_trial_std: float = None, sigma_floor: bool = True) -> GateResult:
     dsr = deflated_sharpe(net.tolist(), n_trials=max(1, trial_count), annualization_factor=ann_factor,
-                          sr_trial_std=sr_trial_std)
+                          sr_trial_std=sr_trial_std, sigma_floor=sigma_floor)
     if "error" in dsr:
         return GateResult("G4_deflated_sharpe", "fail", dsr, dsr["error"])
     raw = float(dsr.get("raw_sharpe", 0.0)); pval = dsr.get("dsr_pvalue"); sig = bool(dsr.get("is_significant", False))
@@ -110,6 +110,7 @@ def g4_deflated_sharpe(net: pd.Series, trial_count: int, ann_factor: float = 365
                       {"raw_sharpe": raw, "dsr_pvalue": pval, "dsr_z": dsr.get("dsr_z_score"),
                        "expected_max_sr": dsr.get("expected_max_sr"), "is_significant": sig,
                        "reliable": reliable, "sigma_sr_source": dsr.get("sigma_sr_source"),
+                       "sigma_sr": dsr.get("sigma_sr"), "n_returns": dsr.get("n_returns"),
                        "trial_count": trial_count, "engine": dsr.get("engine")}, reason)
 
 

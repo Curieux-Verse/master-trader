@@ -73,12 +73,22 @@ def format_system_report(rep: Dict) -> str:
             L.append(f"   [{c.get('market',''):6}] list {c.get('list_hash','')} · "
                      f"{c.get('family_size',0)} finalists (N_eff={c.get('n_eff')}, {c.get('keff_method')}) "
                      f"→ {c.get('n_cleared',0)} cleared")
+            rej = c.get("rejected_by") or {}
+            if rej:
+                gates = "  ".join(f"{g}×{n}" for g, n in rej.items())
+                L.append(f"           rejected by: {gates}")
+            bz_best, msh = c.get("best_oos_z"), c.get("median_oos_sharpe")
+            if bz_best is not None or msh is not None:
+                L.append(f"           best finalist OOS z={('—' if bz_best is None else f'{bz_best:+.2f}')}"
+                         f"   median OOS sharpe={('—' if msh is None else f'{msh:+.4f}')}"
+                         f"   (needs z≳1.64)")
             bo = c.get("book_oos") or {}
             if bo:
                 bz = bo.get("book_dsr_z")
                 L.append(f"           book OOS: {bo.get('n_members',0)} members  "
                          f"z={('—' if bz is None else f'{bz:+.2f}')}  "
-                         f"sharpe={bo.get('book_sharpe_pp')}  (family={bo.get('n_books_tried')})")
+                         f"sharpe={bo.get('book_sharpe_pp')}  (family={bo.get('n_books_tried')}, "
+                         f"σ={bo.get('book_sigma_sr')} via {bo.get('sigma_source')})")
         L.append(f"   holdout budget     : {hold.get('accesses', 0)} accesses across "
                  f"{hold.get('preregistrations', 0)} pre-registrations")
 

@@ -17,6 +17,7 @@ Two experiments, both essential:
 """
 from __future__ import annotations
 
+from collections import Counter
 from datetime import datetime, timezone, timedelta
 
 import numpy as np
@@ -433,6 +434,169 @@ def experiment_minted_vocab_persists(seed: int = 15) -> dict:
     return {"minted": name, "restored": restored, "ok": bool(name and ok_persisted and restored)}
 
 
+def experiment_bandit_recovery() -> dict:
+    """A starved engine must be able to come back.
+
+    The production bandit reached an ABSORBING state: evo α=782.8/β=33205.2 against template
+    α=1.0/β=8939.0, at which template's 99.9th-percentile Thompson draw sits 40× below evo's mean.
+    Measured on the real `bandit_state`, evo won 20000/20000 draws in all three markets and a dead
+    arm needed 210–419 CONSECUTIVE successes to recover. Discounting + a memory cap must make the
+    posterior movable again, and `restore` must rescale a legacy brain's unbounded counts."""
+    from mt.improve.bandit import EngineBandit
+    legacy = {"template": (1.0, 8939.0), "random": (1.0, 10141.0), "evo": (782.8, 33205.2),
+              "miner": (1.3, 17819.7), "llm": (1.2322, 11821.77)}
+
+    # (1) the OLD behaviour, reproduced: no discount, no cap, no forced exploration.
+    # Thompson sampling alone hands the ENTIRE batch to one arm.
+    old = EngineBandit(seed=3, memory=1e18, discount=1.0)
+    for e, (a, b) in legacy.items():
+        old.alpha[e], old.beta[e] = a, b
+    old_wins = Counter(old.sample_engine() for _ in range(4000))
+
+    # (2) the NEW allocator still restores the learned posterior, but no arm may be starved to
+    # zero — rescaling alone cannot fix this, because it preserves the posterior MEAN.
+    new = EngineBandit(seed=3)
+    new.restore(legacy)
+    restored_total = max(new.alpha[e] + new.beta[e] for e in new.engines)
+    alloc = new.allocate(20)
+    engines_funded = sum(1 for v in alloc.values() if v > 0)
+
+    # (3) a dead arm that starts succeeding must overtake within a sane number of updates
+    b2 = EngineBandit(seed=5)
+    b2.restore(legacy)
+    updates = 0
+    while updates < 500:
+        b2.update("llm", 1.0)
+        b2.update("evo", 0.0)
+        updates += 1
+        if b2.weights()["llm"] > b2.weights()["evo"]:
+            break
+    recovered = b2.weights()["llm"] > b2.weights()["evo"]
+    return {"old_engines_sampled": len(old_wins), "new_engines_funded": engines_funded,
+            "alloc": alloc, "restored_max_total": round(restored_total, 1),
+            "updates_to_recover": updates, "recovered": bool(recovered),
+            "ok": bool(len(old_wins) == 1 and engines_funded == len(new.engines)
+                       and recovered and updates <= 60)}
+
+
+def experiment_stage_b_sigma(seed: int = 21) -> dict:
+    """Stage B must deflate by the FRESH-data spread, not the exploratory ledger's σ_SR.
+
+    Two separate defects produced '0 cleared' on every production round:
+      • `book_sigma_sr` returned None on every Stage-B call (membership == pool), silently falling
+        back to the genome-level ledger σ_SR — ~10× too large;
+      • even for single genomes, the exploratory σ_SR (0.118–0.254) was used as the null spread on
+        data that played no part in selection, where the correct spread is the Sharpe's own
+        standard error (0.052–0.075). E[max SR] scales linearly with σ, so xau's bar reached a
+        0.43 per-period Sharpe. Measured: same book, z −0.50 (ledger σ) vs +2.32 (fresh σ).
+    The correction must NOT simply be a looser bar: pure noise has to stay insignificant."""
+    from mt.improve.book import build_book, book_sigma_sr
+    rng = np.random.default_rng(seed)
+    T, K, LEDGER_SIGMA = 240, 12, 0.254            # xau-like: short holdout, wide pooled σ_SR
+
+    def pool(sr_pp, s):
+        r = np.random.default_rng(s)
+        common = r.normal(0, 1, T)
+        return {f"g{i}": pd.Series((0.2236 * common + 0.9747 * r.normal(0, 1, T)) * 0.01
+                                   + sr_pp * 0.01) for i in range(K)}
+
+    # the guard that silently disabled the resample
+    guard_none = book_sigma_sr(pool(0.10, 1), K) is None
+
+    edge = pool(0.12, 2)
+    shipped = build_book(edge, n_books_tried=9, sr_trial_std=LEDGER_SIGMA, members=list(edge))
+    fixed = build_book(edge, n_books_tried=9, sr_trial_std=LEDGER_SIGMA, members=list(edge),
+                       fresh_sigma=True)
+    # null control on the SAME corrected rule
+    null_hits = 0
+    for s in range(30):
+        n = pool(0.0, 500 + s)
+        b = build_book(n, n_books_tried=9, sr_trial_std=LEDGER_SIGMA, members=list(n),
+                       fresh_sigma=True)
+        if b and (b["book_dsr_p"] or 1.0) < 0.05:
+            null_hits += 1
+    return {"guard_returned_none": guard_none,
+            "shipped_z": shipped["book_dsr_z"], "shipped_sigma_src": shipped["sigma_source"],
+            "fixed_z": fixed["book_dsr_z"], "fixed_sigma_src": fixed["sigma_source"],
+            "null_significant": f"{null_hits}/30",
+            "ok": bool(guard_none and shipped["sigma_source"] == "fallback"
+                       and fixed["sigma_source"] == "book_sr_se"
+                       and fixed["book_dsr_z"] > shipped["book_dsr_z"]
+                       and fixed["book_dsr_z"] > 1.645 and null_hits <= 3)}
+
+
+def experiment_retention_preserves_n(seed: int = 22) -> dict:
+    """Pruning may shrink the FILE but must never shrink N, nor drop a load-bearing genome.
+
+    If the Deflated-Sharpe family size were recomputed from surviving ledger rows, retention would
+    lower the bar for every future candidate — manufacturing significance by forgetting trials that
+    were already paid for. It must also keep anything the archive, champions, books, the holdout
+    ledger or the retained hall-of-fame point at."""
+    import os, tempfile
+    from mt.store import MTStore
+    from mt.sim.evalresult import EvalResult
+    tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False); tmp.close()
+    store = MTStore(db_path=tmp.name)
+    rng = np.random.default_rng(seed)
+    for i in range(400):
+        # distinct params ⇒ 400 distinct genome_ids (10+(i%40) with 1+(i%5) collides: 5 divides 40)
+        g = momentum_genome(lookback=10 + i, horizon=1 + (i % 7))
+        store.register_genome(g)
+        r = EvalResult(genome_id=g.genome_id, market="crypto", seed=i, snapshot_id="s")
+        r.net_returns = pd.Series(rng.normal(0.001, 0.01, 60))
+        r.summary = {"net_sharpe": 0.3, "sharpe_pp": 0.05, "ann_return": 0.1, "max_dd": 0.1,
+                     "hit_rate": 0.5, "avg_turnover": 0.2, "n_periods": 60}
+        store.record_eval(r)
+        store.upsert_hof(g.genome_id, "crypto", float(rng.normal()), 0.1, False, {}, 0.05, edge_t=0.5)
+    store.record_screening("crypto", 5000, "miner_ic")
+    keep_id = [r["genome_id"] for r in store.archive_rows("crypto")]
+    n_before = store.trial_count("crypto")
+    rows_before = store.conn.execute("SELECT COUNT(*) FROM hall_of_fame").fetchone()[0]
+    p = store.prune(keep_reports=50, keep_hof=25, keep_ledger=50)
+    n_after = store.trial_count("crypto")
+    rows_after = store.conn.execute("SELECT COUNT(*) FROM hall_of_fame").fetchone()[0]
+    kept_protected = all(store.get_genome(g) is not None for g in keep_id)
+    store.close()
+    try:
+        os.unlink(tmp.name)
+    except OSError:
+        pass
+    return {"n_before": n_before, "n_after": n_after, "hof_before": rows_before,
+            "hof_after": rows_after, "pruned": p["hall_of_fame"] + p["result_ledger"],
+            "protected_kept": kept_protected,
+            "ok": bool(n_after >= n_before and rows_after < rows_before and kept_protected)}
+
+
+def experiment_targeted_coverage(seed: int = 23) -> dict:
+    """Aiming at empty cells must open MORE behavioural niches than blind sampling.
+
+    The production archive held 26 of ~540 reachable cells (4.8%), with the `short` exposure bucket
+    empty in every market and QD-score flat at +9.11 while 26k 'admissions' were all replacements
+    of the same incumbents."""
+    import os, tempfile
+    from mt.store import MTStore
+    from mt.improve.loop import DiscoveryLoop
+    tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False); tmp.close()
+    store = MTStore(db_path=tmp.name)
+    panel = make_panel(edge=True, n_sym=8, bars=400, seed=seed)
+    loop = DiscoveryLoop(store, "crypto", panel, None, seed=seed)
+    empties = len(loop._empty_cells())
+    blind = Counter()
+    aimed = Counter()
+    for i in range(60):
+        g = loop.sampler._random("crypto")
+        blind[(g.signal.args.get("regime", "all"), g.signal.args.get("direction", "neutral"))] += 1
+        t = loop._targeted("crypto")
+        aimed[(t.signal.args.get("regime", "all"), t.signal.args.get("direction", "neutral"))] += 1
+    store.close()
+    try:
+        os.unlink(tmp.name)
+    except OSError:
+        pass
+    return {"empty_cells_seen": empties, "blind_combos": len(blind), "aimed_combos": len(aimed),
+            "ok": bool(empties > 0 and len(aimed) >= len(blind))}
+
+
 def experiment_failure_memory(seed: int = 16) -> dict:
     """Failures must produce AGGREGATABLE facts and a gate-specific repair.
 
@@ -493,6 +657,10 @@ def run(verbose: bool = True) -> dict:
     j = experiment_archive_and_book()
     k_ = experiment_minted_vocab_persists()
     l = experiment_failure_memory()
+    m = experiment_bandit_recovery()
+    n = experiment_stage_b_sigma()
+    o = experiment_retention_preserves_n()
+    p = experiment_targeted_coverage()
     trap_ok = not a["passed"]                       # the overfit winner MUST be rejected
     # the real edge MUST survive the exploratory screen AND clear confirmatory significance
     edge_ok = bool(b["g4_significant"]) and bool(b["promoted"])
@@ -506,6 +674,10 @@ def run(verbose: bool = True) -> dict:
     book_ok = bool(j["ok"])                         # portfolio beats its best member, honestly charged
     vocab_ok = bool(k_["ok"])                       # minted primitives survive a restart
     memory_ok = bool(l["ok"])                       # failures aggregate + repairs are gate-specific
+    bandit_ok = bool(m["ok"])                       # a starved engine can come back
+    sigma_ok_b = bool(n["ok"])                      # Stage B deflates by the FRESH-data spread
+    retain_ok = bool(o["ok"])                       # retention shrinks the file, never N
+    cover_ok = bool(p["ok"])                        # targeted emitters aim at unoccupied cells
     if verbose:
         print("=" * 72)
         print(" GAUNTLET SELF-TEST — the critical go/no-go (docs/09 P2)")
@@ -549,8 +721,27 @@ def run(verbose: bool = True) -> dict:
         print(f"\n(K) Failure memory: top family prior={l['family_priors'][:1]}, "
               f"G1 repair lengthens horizon={l['g1_lengthens_horizon']}")
         print(f"    -> {'PASS ✓ (failures aggregate; repairs target the failing statistic)' if memory_ok else 'FAIL ✗'}")
+        print(f"\n(L) Bandit recovery: legacy posterior gave Thompson sampling "
+              f"{m['old_engines_sampled']} engine(s); the new allocator funds "
+              f"{m['new_engines_funded']}/5 (α+β capped at {m['restored_max_total']}) → "
+              f"{m['alloc']}; a dead arm overtakes in {m['updates_to_recover']} updates "
+              f"(was 210–419 CONSECUTIVE successes)")
+        print(f"    -> {'PASS ✓ (the posterior can move again; no absorbing state)' if bandit_ok else 'FAIL ✗'}")
+        print(f"\n(M) Stage-B σ: resample guard returned None = {n['guard_returned_none']}; "
+              f"same book z={n['shipped_z']} via {n['shipped_sigma_src']} → z={n['fixed_z']} via "
+              f"{n['fixed_sigma_src']}")
+        print(f"    null control: edgeless books significant = {n['null_significant']} (must stay ≲3/30)")
+        print(f"    -> {'PASS ✓ (fresh-data spread confirms a real edge without waving noise through)' if sigma_ok_b else 'FAIL ✗'}")
+        print(f"\n(N) Retention: N {o['n_before']} → {o['n_after']} (must not fall), "
+              f"hall-of-fame {o['hof_before']} → {o['hof_after']} rows, "
+              f"protected genomes kept = {o['protected_kept']}")
+        print(f"    -> {'PASS ✓ (the file shrinks; the family size and load-bearing rows do not)' if retain_ok else 'FAIL ✗'}")
+        print(f"\n(O) Targeted coverage: {p['empty_cells_seen']} empty cells visible; distinct "
+              f"(regime,direction) combos blind={p['blind_combos']} vs aimed={p['aimed_combos']}")
+        print(f"    -> {'PASS ✓ (generation is steered at unoccupied behaviour)' if cover_ok else 'FAIL ✗'}")
         ok = all([trap_ok, edge_ok, neff_ok, dir_ok, robust_ok, keff_ok, dedup_ok,
-                  stage_ok, book_ok, vocab_ok, memory_ok])
+                  stage_ok, book_ok, vocab_ok, memory_ok,
+                  bandit_ok, sigma_ok_b, retain_ok, cover_ok])
         verdict = "TRUSTWORTHY" if ok else "NOT TRUSTWORTHY — DO NOT PROCEED"
         print("\n" + "=" * 72)
         print(f" RESULT: gauntlet is {verdict}")
@@ -558,8 +749,11 @@ def run(verbose: bool = True) -> dict:
     return {"trap_ok": trap_ok, "edge_ok": edge_ok, "neff_ok": neff_ok, "dir_ok": dir_ok,
             "robust_ok": robust_ok, "keff_ok": keff_ok, "dedup_ok": dedup_ok, "stage_ok": stage_ok,
             "book_ok": book_ok, "vocab_ok": vocab_ok, "memory_ok": memory_ok,
+            "bandit_ok": bandit_ok, "sigma_ok_b": sigma_ok_b, "retain_ok": retain_ok,
+            "cover_ok": cover_ok,
             "overfit": a, "edge": b, "neff": c, "directional": d, "robustness": e,
-            "keff": f, "dedup": h, "two_stage": i, "book": j, "vocab": k_, "memory": l}
+            "keff": f, "dedup": h, "two_stage": i, "book": j, "vocab": k_, "memory": l,
+            "bandit": m, "stage_b_sigma": n, "retention": o, "coverage": p}
 
 
 if __name__ == "__main__":
@@ -567,4 +761,5 @@ if __name__ == "__main__":
     r = run()
     sys.exit(0 if all(r[k] for k in ("trap_ok", "edge_ok", "neff_ok", "dir_ok", "robust_ok",
                                      "keff_ok", "dedup_ok", "stage_ok", "book_ok", "vocab_ok",
-                                     "memory_ok")) else 1)
+                                     "memory_ok", "bandit_ok", "sigma_ok_b", "retain_ok",
+                                     "cover_ok")) else 1)

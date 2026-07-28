@@ -61,8 +61,15 @@ def confirm(store, market: str, holdout_panel, seed: int = 4242,
         return None
 
     # ── the confirmatory family: the finalists, deflated to independent trials ──
-    sigs = store.trial_signatures(market)
+    # K_eff must be measured on the FINALISTS' OWN return signatures. It used to be computed from
+    # `store.trial_signatures(market)` — the market-wide trial population — and then applied to the
+    # finalist count. The finalists come from distinct MAP-Elites niches, so they are far less
+    # mutually correlated than the general population; borrowing the population's ratio understated
+    # N_eff and made the confirmatory family too small, i.e. the bar too easy.
     from mt.gauntlet.multipletest import effective_trials
+    sigs = store.trial_signatures(market, genome_ids=ids)
+    if len(sigs) < 3:                                  # not enough signatures to estimate ρ
+        sigs = store.trial_signatures(market)
     keff = effective_trials(len(ids), sigs)
     n_eff = int(keff["n_eff"])
 
@@ -71,9 +78,12 @@ def confirm(store, market: str, holdout_panel, seed: int = 4242,
 
     gauntlet = Gauntlet()
     sr_std = store.sr_trial_std(market) or store.sr_trial_std(None)
+    # `fresh_sigma` makes G4 derive the deflation spread from each finalist's OWN holdout series
+    # instead of the exploratory ledger (see runner.run). `sr_trial_std` stays as the fallback for
+    # any series too short to estimate a standard error from.
     ctx = GauntletContext(eval_fn=lambda g, p: evaluate(g, p, seed), panel=holdout_panel,
                           holdout_panel=holdout_panel, archive_returns={}, seed=seed,
-                          sr_trial_std=sr_std)
+                          sr_trial_std=sr_std, fresh_sigma=True)
 
     results, cleared = [], []
     oos_returns: Dict[str, object] = {}
@@ -117,18 +127,28 @@ def confirm(store, market: str, holdout_panel, seed: int = 4242,
         # plus the book in front of the same sealed panel, and earlier rounds spent it too. Charge
         # all of them, so a portfolio cannot be quietly cheaper to confirm than its members.
         b = build_book(oos_returns, n_books_tried=n_eff + 1 + store.prereg_count(market),
-                       sr_trial_std=sr_std, members=list(oos_returns))
+                       sr_trial_std=sr_std, members=list(oos_returns), fresh_sigma=True)
         if b:
             book = {k: v for k, v in b.items() if k != "returns"}
             store.record_book(market, b["members"], None, None,
                               b["book_sharpe_pp"], b["book_dsr_z"])
 
     store.mark_confirmed(prereg_id)
+    # WHY a round failed is the single most useful line in the digest. Without it "→ 0 cleared" is
+    # indistinguishable from a bug, and diagnosing the 2026-07-28 rounds needed a forensic audit of
+    # the brain rather than a glance at the report.
+    from collections import Counter
+    rejected = Counter(r["failed_gate"] or "?" for r in results if not r["cleared"])
+    zs = [r["oos_dsr_z"] for r in results if r.get("oos_dsr_z") is not None]
+    shp = [r["oos_sharpe"] for r in results if r.get("oos_sharpe") is not None]
     return {
         "prereg_id": prereg_id, "list_hash": list_hash, "market": market,
         "family_size": len(ids), "n_eff": n_eff, "keff_method": keff["method"],
         "n_tested": len(results), "n_cleared": len(cleared), "cleared": cleared,
         "results": results, "book_oos": book,
+        "rejected_by": dict(rejected.most_common()),
+        "best_oos_z": (max(zs) if zs else None),
+        "median_oos_sharpe": (float(np.median(shp)) if shp else None),
         "holdout_accesses_total": store.holdout_access_count(market),
     }
 

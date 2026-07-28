@@ -28,6 +28,7 @@ class GauntletContext:
     cpcv_groups: int = 6
     fdr_threshold: Optional[float] = None                 # Stage-A BHY discovery threshold
     fdr_q: float = 0.10
+    fresh_sigma: bool = False                             # Stage B: derive σ_SR from THIS series
 
 
 STAGE_EXPLORE = "A"     # screening: FDR-controlled, N-independent, holdout is FORBIDDEN
@@ -96,6 +97,20 @@ class Gauntlet:
         fdr_thr = ctx.fdr_threshold if ctx else None
         fdr_q = ctx.fdr_q if ctx else G.FDR_Q
         explore = (stage == STAGE_EXPLORE)
+
+        # STAGE B USES A FRESH-DATA NULL SPREAD, NOT THE EXPLORATORY LEDGER'S σ_SR.
+        # E[max SR] = σ_SR·E[max of N] asks "how high would the best of N score by luck?". In
+        # Stage A the observed cross-trial dispersion is the right answer. On the pre-registered
+        # holdout no selection happened, so under the null each finalist's Sharpe is just a fresh
+        # estimate whose spread is its own standard error ≈1/√T. Reusing the exploratory σ_SR there
+        # charges for the selection a second time — it is 1.5–3.4× the fresh-data s.e., and since
+        # E[max] scales linearly with σ it pushed the xau bar to a 0.43 per-period Sharpe, which
+        # nothing can clear. Measured: same book, z −0.50 (shipped) vs +2.32 (fresh σ).
+        if not explore and ctx is not None and ctx.fresh_sigma:
+            from mt.adapters.cclib import sharpe_std_error
+            fresh = sharpe_std_error(net.tolist())
+            if fresh and fresh > 0:
+                sr_std = fresh
 
         # (1) VALIDITY — a degenerate series makes every downstream statistic meaningless, so this
         # is the one place a hard short-circuit is still correct.

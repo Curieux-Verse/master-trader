@@ -34,10 +34,22 @@ MAX_MEMBERS = 24
 
 def _align(series_by_id: Dict[str, pd.Series]) -> pd.DataFrame:
     """Union calendar, flat (0.0) where a member did not trade — the same time-alignment rule the
-    CPCV matrix uses, so a member that trades rarely cannot silently shorten the book."""
+    CPCV matrix uses, so a member that trades rarely cannot silently shorten the book.
+
+    Duplicate index labels are collapsed FIRST. A member whose return series carries a repeated
+    timestamp (the cross-sectional executor indexes by rebalance bar, and a panel with a repeated
+    bar produces one) made `pd.DataFrame({...})` raise "cannot reindex on an axis with duplicate
+    labels". In Stage B that exception was swallowed by the caller's try/except and reported as
+    "confirmation skipped" — a silent loss of the entire confirmation round."""
     if not series_by_id:
         return pd.DataFrame()
-    df = pd.DataFrame({k: pd.Series(v).astype(float) for k, v in series_by_id.items()})
+    clean = {}
+    for k, v in series_by_id.items():
+        s = pd.Series(v).astype(float)
+        if s.index.has_duplicates:
+            s = s.groupby(level=0).mean()
+        clean[k] = s
+    df = pd.DataFrame(clean)
     return df.sort_index().fillna(0.0)
 
 
@@ -127,7 +139,8 @@ def book_sigma_sr(series_by_id: Dict[str, pd.Series], n_members: int,
 def build_book(series_by_id: Dict[str, pd.Series], n_books_tried: int = 0,
                sr_trial_std: Optional[float] = None,
                max_members: int = MAX_MEMBERS,
-               members: Optional[List[str]] = None) -> Optional[dict]:
+               members: Optional[List[str]] = None,
+               fresh_sigma: bool = False) -> Optional[dict]:
     """Assemble the equal-weight book and test ITS Deflated Sharpe.
 
     The family size charged is `n_books_tried` (books assembled in previous rounds) PLUS the
@@ -137,7 +150,7 @@ def build_book(series_by_id: Dict[str, pd.Series], n_books_tried: int = 0,
 
     Pass `members` to score a FIXED, pre-registered membership (Stage-B confirmation): no
     selection happens, so no selection trials are charged."""
-    from mt.adapters.cclib import deflated_sharpe
+    from mt.adapters.cclib import deflated_sharpe, sharpe_std_error
     if members is None:
         members, sel_trials = select_members(series_by_id, max_members=max_members)
     else:
@@ -154,10 +167,23 @@ def build_book(series_by_id: Dict[str, pd.Series], n_books_tried: int = 0,
     corr = df.corr().to_numpy(float)
     iu = np.triu_indices_from(corr, k=1)
     mean_corr = float(np.nanmean(corr[iu])) if corr.shape[0] > 1 else 0.0
-    # σ_SR must describe the dispersion of BOOKS, not of genomes (see book_sigma_sr). Fall back to
-    # the caller's value only if the pool is too small to resample.
-    resampled = book_sigma_sr(series_by_id, len(members))
-    sigma = resampled or sr_trial_std
+    # σ_SR must describe the dispersion of BOOKS, not of genomes (see book_sigma_sr).
+    #
+    # `fresh_sigma` is the Stage-B case: membership was pre-registered and the panel is sealed, so
+    # nothing was selected on this data and the null spread is simply the book's own Sharpe
+    # standard error. Resampling subsets would be meaningless there anyway — Stage B passes the
+    # finalists as BOTH the pool and the membership, so `book_sigma_sr`'s `len(ids) <= n_members`
+    # guard returned None on every single call and the code silently fell back to the genome-level
+    # ledger σ_SR: the exact category error this function exists to prevent, ~10× too large.
+    resampled = None if fresh_sigma else book_sigma_sr(series_by_id, len(members))
+    sigma = resampled
+    sigma_source = "book_resample"
+    if sigma is None and fresh_sigma:
+        sigma = sharpe_std_error(r.tolist())
+        sigma_source = "book_sr_se"
+    if sigma is None:
+        sigma = sr_trial_std
+        sigma_source = "fallback"
     d = deflated_sharpe(book.tolist(), n_trials=max(1, int(n_books_tried)), sr_trial_std=sigma)
     solo = [_sharpe(df[c].to_numpy()) for c in df.columns]
     solo = [s for s in solo if np.isfinite(s)]
@@ -173,7 +199,7 @@ def build_book(series_by_id: Dict[str, pd.Series], n_books_tried: int = 0,
         "book_dsr_p": d.get("dsr_pvalue"),
         "book_reliable": d.get("reliable"),
         "book_sigma_sr": None if sigma is None else round(float(sigma), 6),
-        "sigma_source": "book_resample" if resampled else "fallback",
+        "sigma_source": sigma_source,
         "n_books_tried": int(n_books_tried),
         "selection_trials": int(sel_trials),
         "returns": book,

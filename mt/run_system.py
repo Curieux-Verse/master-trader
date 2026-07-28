@@ -44,9 +44,15 @@ def _build_panels(market, source, snapshot_id, seed, structure):
         # Note the ~2% EMBARGO GAPS (0.70–0.72, 0.84–0.86) dropped between splits: adjacent bars
         # are serially correlated, so an unembargoed holdout/live isn't truly out-of-sample
         # (López de Prado purge/embargo). The gaps make the G6 transfer + paper genuinely unseen.
-        train = read_lake_panel(market, snapshot_id, 0.0, 0.70, max_bars=2000)    # discovery
-        holdout = read_lake_panel(market, snapshot_id, 0.72, 0.84, max_bars=500)  # transfer holdout (G6)
-        live = read_lake_panel(market, snapshot_id, 0.86, 1.0, max_bars=400)      # most recent → paper
+        # The confirmatory bar falls as 1/√T, so holdout LENGTH is the dominant term in whether a
+        # real strategy can ever be confirmed — more so than any statistical refinement. The old
+        # 0.72–0.84 slice gave ~180–370 usable observations, at which E[max SR] alone demanded a
+        # per-period Sharpe of 0.24–0.43; nothing could clear it. Widening to 0.55–0.80 roughly
+        # doubles T (≈−30% on the required Sharpe) while leaving discovery a 55% train window and
+        # keeping the ~2% embargo gaps that make the split genuinely point-in-time.
+        train = read_lake_panel(market, snapshot_id, 0.0, 0.53, max_bars=2000)    # discovery
+        holdout = read_lake_panel(market, snapshot_id, 0.55, 0.80, max_bars=1200)  # transfer holdout (G6)
+        live = read_lake_panel(market, snapshot_id, 0.82, 1.0, max_bars=400)      # most recent → paper
         return train, holdout, live
     a = MarketAdapter(market)
     return (a.build_panel(bars=440, seed=seed, structure=structure, snapshot_id=f"sys_{market}"),
