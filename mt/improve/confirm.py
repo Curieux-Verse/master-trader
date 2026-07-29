@@ -35,6 +35,8 @@ from mt.gauntlet import Gauntlet, GauntletContext
 from mt.gauntlet.runner import STAGE_CONFIRM
 from mt.sim import evaluate
 
+N_HOLDOUT_REFERENCE = 40      # random genomes used to calibrate G10's bar on the sealed panel
+
 
 def finalists(store, market: str, limit: int = 12) -> List[str]:
     """The Stage-A survivors that are eligible for confirmation.
@@ -78,12 +80,42 @@ def confirm(store, market: str, holdout_panel, seed: int = 4242,
 
     gauntlet = Gauntlet()
     sr_std = store.sr_trial_std(market) or store.sr_trial_std(None)
+
+    # ── G10's reference distribution, rebuilt ON THE HOLDOUT ──
+    # The exploratory reference describes the training panel and cannot be reused here: a bar
+    # calibrated on one dataset says nothing about performance on another. Random genomes are not
+    # candidates and are never promoted, so they create no selection bias — but they ARE reads of
+    # the sealed panel, so every one is counted under its own purpose. This gives Stage B a
+    # confirmation cross-check that involves no σ_SR at all, which matters because σ_SR is the
+    # component we found to be most fragile.
+    random_ref: List[float] = []
+    try:
+        from mt.generators import TemplateSampler
+        sampler = TemplateSampler(seed=seed + 77)
+        for _ in range(N_HOLDOUT_REFERENCE):
+            rg = sampler._random(market)
+            if not rg.typecheck()[0]:
+                continue
+            store.record_holdout_access(market, rg.genome_id, "g10_reference", prereg_id)
+            try:
+                rr = evaluate(rg, holdout_panel, seed)
+            except Exception:
+                continue
+            if not rr.ok:
+                continue
+            spp = rr.summary.get("sharpe_pp"); npd = int(rr.summary.get("n_periods", 0) or 0)
+            if spp is None or not np.isfinite(spp) or npd < 2:
+                continue
+            random_ref.append(float(spp) * float(np.sqrt(npd)))
+    except Exception:
+        random_ref = []
     # `fresh_sigma` makes G4 derive the deflation spread from each finalist's OWN holdout series
     # instead of the exploratory ledger (see runner.run). `sr_trial_std` stays as the fallback for
     # any series too short to estimate a standard error from.
     ctx = GauntletContext(eval_fn=lambda g, p: evaluate(g, p, seed), panel=holdout_panel,
                           holdout_panel=holdout_panel, archive_returns={}, seed=seed,
-                          sr_trial_std=sr_std, fresh_sigma=True)
+                          sr_trial_std=sr_std, fresh_sigma=True,
+                          random_ref=random_ref, random_ref_k=max(1, n_eff))
 
     results, cleared = [], []
     oos_returns: Dict[str, object] = {}

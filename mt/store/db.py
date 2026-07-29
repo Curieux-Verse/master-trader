@@ -534,9 +534,32 @@ class MTStore:
             " VALUES(?,?,?,?,?)", (market, genome_id, purpose, prereg_id, time.time()))
         self.conn.commit()
 
-    def holdout_access_count(self, market: Optional[str] = None) -> int:
-        q = "SELECT COUNT(*) FROM holdout_ledger" + (" WHERE market=?" if market else "")
-        return int(self.conn.execute(q, ((market,) if market else ())).fetchone()[0])
+    def holdout_access_count(self, market: Optional[str] = None,
+                             purpose: Optional[str] = None) -> int:
+        q = "SELECT COUNT(*) FROM holdout_ledger"
+        where, args = [], []
+        if market:
+            where.append("market=?"); args.append(market)
+        if purpose:
+            where.append("purpose=?"); args.append(purpose)
+        if where:
+            q += " WHERE " + " AND ".join(where)
+        return int(self.conn.execute(q, tuple(args)).fetchone()[0])
+
+    def holdout_access_breakdown(self, market: Optional[str] = None) -> dict:
+        """Accesses split BY PURPOSE.
+
+        A single total is no longer interpretable now that G10 calibrates its bar on the sealed
+        panel: 40 of those reads are random genomes that are never promoted and can create no
+        selection bias, and lumping them in with candidate reads would make the budget line look
+        alarming for the one kind of access that is actually harmless. Both still get counted —
+        the discipline is that every read is recorded, not that some reads are exempt."""
+        q = "SELECT COALESCE(purpose,'?') p, COUNT(*) n FROM holdout_ledger"
+        args: tuple = ()
+        if market:
+            q += " WHERE market=?"; args = (market,)
+        q += " GROUP BY p ORDER BY n DESC"
+        return {r[0]: int(r[1]) for r in self.conn.execute(q, args)}
 
     def preregister(self, market: str, genome_ids: List[str], n_eff: int, method: str) -> tuple:
         """Seal a Stage-B finalist list BEFORE the holdout is read. Returns (prereg_id, hash).

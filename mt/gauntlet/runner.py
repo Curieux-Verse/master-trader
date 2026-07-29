@@ -29,6 +29,8 @@ class GauntletContext:
     fdr_threshold: Optional[float] = None                 # Stage-A BHY discovery threshold
     fdr_q: float = 0.10
     fresh_sigma: bool = False                             # Stage B: derive σ_SR from THIS series
+    random_ref: Optional[list] = None                     # G10: edge_t of random genomes, same panel
+    random_ref_k: int = 1                                 # candidates sharing that reference (bar ∝ k)
 
 
 STAGE_EXPLORE = "A"     # screening: FDR-controlled, N-independent, holdout is FORBIDDEN
@@ -138,6 +140,10 @@ class Gauntlet:
             G.g2_oos_degradation(net),
             G.g7_capacity(genome, res, ctx),
             G.g8_orthogonality(res, ctx),
+            # Empirical reference distribution — advisory while exploring (it describes the
+            # strategy SPACE, not a null hypothesis about the data), enforced at confirmation
+            # where the claim is being made.
+            G.g10_beat_random(net, ctx).as_advisory() if explore else G.g10_beat_random(net, ctx),
         ]
         passed_all = True
         for gate in cheap:
@@ -149,16 +155,23 @@ class Gauntlet:
 
         # (3) EXPENSIVE — only for survivors. G6 reads the sealed holdout and is CONFIRM-ONLY.
         if passed_all:
-            expensive = [lambda: G.g3_cpcv_pbo(genome, ctx)]
+            # G3 (PBO) and G9 (plateau) come from ONE parameter-neighbourhood matrix — the most
+            # expensive object built here — so they are produced together, not run twice.
+            def _cpcv_pair():
+                return G.cpcv_and_plateau(genome, ctx)
+            expensive = [_cpcv_pair]
             if not explore:
-                expensive.append(lambda: G.g6_transfer(genome, ctx))
+                expensive.append(lambda: (G.g6_transfer(genome, ctx),))
+            stop = False
             for thunk in expensive:
-                gate = thunk()
-                report.gates[gate.name] = {"status": gate.status, "reason": gate.reason,
-                                           "advisory": gate.advisory, **gate.stats}
-                if gate.enforced and not gate.passed:
-                    passed_all = False
-                    report.failed_gate = gate.name
+                for gate in thunk():
+                    report.gates[gate.name] = {"status": gate.status, "reason": gate.reason,
+                                               "advisory": gate.advisory, **gate.stats}
+                    if gate.enforced and not gate.passed and not stop:
+                        passed_all = False
+                        report.failed_gate = gate.name
+                        stop = True
+                if stop:
                     break
 
         report.passed = passed_all
@@ -172,8 +185,20 @@ class Gauntlet:
         g7 = report.gates.get("G7_capacity", {})
         g8 = report.gates.get("G8_orthogonality", {})
         gs = report.gates.get("GS_screen", {})
+        g9 = report.gates.get("G9_plateau", {})
+        g10 = report.gates.get("G10_beat_random", {})
         pbo = g3.get("pbo")
+        # SHAPE of the equity curve — Sharpe cannot distinguish a steady climb from the same
+        # endpoint reached through two lucky windows, and nothing in the vector could before.
+        from mt.gauntlet.equity import equity_metrics
+        eq = equity_metrics(res.net_returns.tolist(),
+                            res.summary.get("periods_per_year"))
         return {
+            "k_ratio": eq["k_ratio"],
+            "persistence": eq["persistence"],
+            "recovery_factor": eq["recovery_factor"],
+            "plateau_pass_pct": g9.get("plateau_pass_pct"),
+            "beat_random_pct": g10.get("beat_random_pct"),
             "deflated_sharpe": g4.get("raw_sharpe"),
             "dsr_pvalue": g4.get("dsr_pvalue"),
             "dsr_z": g4.get("dsr_z"),

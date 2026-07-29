@@ -597,6 +597,105 @@ def experiment_targeted_coverage(seed: int = 23) -> dict:
             "ok": bool(empties > 0 and len(aimed) >= len(blind))}
 
 
+def experiment_equity_shape() -> dict:
+    """Sharpe cannot see the SHAPE of an equity curve; these three statistics must.
+
+    The case that matters is 'two lucky windows': a strategy that is flat for most of its life and
+    makes everything in two bursts. Its Sharpe and its K-ratio can both look respectable — the
+    K-ratio is a t-statistic of the trend, and two well-spaced bursts still fit a line — so
+    persistence is what has to catch it. If one metric could do this alone the other would not
+    earn its place in the report."""
+    from mt.gauntlet.equity import equity_metrics, MAX_K_RATIO
+    # MEDIANS over seeds, not one draw. With 200 observations the realised drift of a high-vol
+    # series has a standard error comparable to the drift itself, so a single sample can rank the
+    # choppy curve above the steady one by luck alone and the test would be measuring the seed.
+    def med(sd, mu=0.004, n=200, reps=25):
+        vals = []
+        for s in range(reps):
+            r = np.random.default_rng(900 + s).normal(mu, sd, n)
+            k = equity_metrics(list(r), 252)["k_ratio"]
+            if k is not None:
+                vals.append(k)
+        return float(np.median(vals))
+    steady_k, choppy_k = med(0.010), med(0.060)
+    lucky = [0.0] * 90 + [0.09] * 10 + [0.0] * 90 + [0.09] * 10
+    const = [0.01] * 200
+    steady = list(np.random.default_rng(900).normal(0.004, 0.010, 200))
+    m_steady, m_lucky, m_const = (equity_metrics(x, 252) for x in (steady, lucky, const))
+    m_steady["k_ratio"], m_choppy = steady_k, {"k_ratio": choppy_k}
+    return {
+        "steady_k": round(m_steady["k_ratio"], 3), "choppy_k": round(m_choppy["k_ratio"], 3),
+        "lucky_k": round(m_lucky["k_ratio"], 3), "lucky_persistence": m_lucky["persistence"],
+        "steady_persistence": m_steady["persistence"], "const_k": m_const["k_ratio"],
+        "ok": bool(
+            m_steady["k_ratio"] > m_choppy["k_ratio"]            # straight beats jagged
+            and m_steady["persistence"] > m_lucky["persistence"]  # persistence catches the bursts
+            and m_lucky["persistence"] <= 0.35
+            and abs(m_const["k_ratio"]) <= MAX_K_RATIO            # degenerate series cannot blow up
+        )}
+
+
+def experiment_plateau(seed: int = 32) -> dict:
+    """A spike in parameter space must fail; a plateau must pass.
+
+    Built directly on the statistic rather than the gate so the two landscapes can be controlled
+    exactly: column 0 is the centre, the rest are its parameter neighbours."""
+    from mt.gauntlet.cpcv import plateau_stats
+    rng = np.random.default_rng(seed)
+    T = 300
+    # Neighbouring parameterisations trade the SAME data, so their P&L is strongly correlated —
+    # a neighbourhood of independent columns is not a plateau, it is eight unrelated strategies,
+    # and judging the gate against that would understate it badly.
+    def neighbourhood(mu_centre, mu_neigh, rho=0.85, k=8):
+        common = rng.normal(0.0, 1.0, T)
+        cols = []
+        for i in range(k):
+            idio = rng.normal(0.0, 1.0, T)
+            base = np.sqrt(rho) * common + np.sqrt(1 - rho) * idio
+            cols.append(base + (mu_centre if i == 0 else mu_neigh))
+        return np.column_stack(cols)
+    p_flat = plateau_stats(neighbourhood(0.30, 0.28))      # PLATEAU: neighbours as good as centre
+    p_spike = plateau_stats(neighbourhood(0.45, 0.0))      # SPIKE: centre only, neighbours dead
+    dead = plateau_stats(neighbourhood(-0.20, -0.20))      # no edge anywhere
+    return {"plateau_pct": p_flat["plateau_pass_pct"], "spike_pct": p_spike["plateau_pass_pct"],
+            "dead_pct": dead["plateau_pass_pct"], "n": p_flat["plateau_n"],
+            "ok": bool(p_flat["plateau_pass_pct"] >= 50.0 and p_spike["plateau_pass_pct"] < 50.0
+                       and dead["plateau_pass_pct"] == 0.0)}
+
+
+def experiment_beat_random(seed: int = 33) -> dict:
+    """The empirical bar must reject noise, admit a real edge, and TIGHTEN as the search widens.
+
+    This is the σ-free cross-check: it never touches σ_SR, which is the component that proved most
+    fragile (a contaminated ledger read 2,497 against a true 0.22, and a σ pooled over trials whose
+    T differs 76× is wrong at nearly every horizon). The adaptive bar is the part that makes it a
+    test rather than a leaderboard — screening k candidates against one reference at a fixed 85%
+    would admit 0.15·k false passes, which at marathon scale is no control at all."""
+    from mt.gauntlet.gates import g10_beat_random, BEAT_RANDOM_ALPHA
+    from mt.gauntlet.runner import GauntletContext
+    rng = np.random.default_rng(seed)
+    T = 250
+    ref = list(rng.normal(0.0, 1.0, 200))          # edge_t of 200 random genomes: mean 0
+    def ctx(k):
+        return GauntletContext(random_ref=ref, random_ref_k=k)
+    def series(sr_pp):
+        return pd.Series(rng.normal(sr_pp, 1.0, T) * 0.01)
+    strong = series(0.22)                           # edge_t ≈ 3.5
+    noise = series(0.0)
+    r_strong_k1 = g10_beat_random(strong, ctx(1))
+    r_noise_k1 = g10_beat_random(noise, ctx(1))
+    r_strong_k500 = g10_beat_random(strong, ctx(500))
+    bar1 = r_strong_k1.stats["br_required_pct"]
+    bar500 = r_strong_k500.stats["br_required_pct"]
+    cold = g10_beat_random(strong, GauntletContext(random_ref=[0.1, 0.2]))
+    return {"strong_beat_pct": r_strong_k1.stats["beat_random_pct"], "bar_k1": bar1,
+            "bar_k500": bar500, "strong_k1": r_strong_k1.status, "noise_k1": r_noise_k1.status,
+            "cold": cold.status, "alpha": BEAT_RANDOM_ALPHA,
+            "ok": bool(r_strong_k1.passed and not r_noise_k1.passed
+                       and bar500 > bar1                     # bar rises with the family
+                       and cold.status == "deferred")}       # no reference ⇒ no opinion
+
+
 def experiment_failure_memory(seed: int = 16) -> dict:
     """Failures must produce AGGREGATABLE facts and a gate-specific repair.
 
@@ -661,6 +760,9 @@ def run(verbose: bool = True) -> dict:
     n = experiment_stage_b_sigma()
     o = experiment_retention_preserves_n()
     p = experiment_targeted_coverage()
+    q = experiment_equity_shape()
+    r_ = experiment_plateau()
+    t_ = experiment_beat_random()
     trap_ok = not a["passed"]                       # the overfit winner MUST be rejected
     # the real edge MUST survive the exploratory screen AND clear confirmatory significance
     edge_ok = bool(b["g4_significant"]) and bool(b["promoted"])
@@ -678,6 +780,9 @@ def run(verbose: bool = True) -> dict:
     sigma_ok_b = bool(n["ok"])                      # Stage B deflates by the FRESH-data spread
     retain_ok = bool(o["ok"])                       # retention shrinks the file, never N
     cover_ok = bool(p["ok"])                        # targeted emitters aim at unoccupied cells
+    shape_ok = bool(q["ok"])                        # equity-curve shape is visible to the search
+    plateau_ok = bool(r_["ok"])                     # a spike in parameter space fails, a plateau passes
+    brand_ok = bool(t_["ok"])                       # empirical bar rejects noise and tightens with k
     if verbose:
         print("=" * 72)
         print(" GAUNTLET SELF-TEST — the critical go/no-go (docs/09 P2)")
@@ -739,9 +844,21 @@ def run(verbose: bool = True) -> dict:
         print(f"\n(O) Targeted coverage: {p['empty_cells_seen']} empty cells visible; distinct "
               f"(regime,direction) combos blind={p['blind_combos']} vs aimed={p['aimed_combos']}")
         print(f"    -> {'PASS ✓ (generation is steered at unoccupied behaviour)' if cover_ok else 'FAIL ✗'}")
+        print(f"\n(P) Equity shape: steady k={q['steady_k']} vs choppy k={q['choppy_k']}; "
+              f"'two lucky windows' k={q['lucky_k']} looks fine but persistence={q['lucky_persistence']} "
+              f"catches it (steady={q['steady_persistence']}); degenerate const clamped at {q['const_k']}")
+        print(f"    -> {'PASS OK (shape is visible; no single metric is sufficient alone)' if shape_ok else 'FAIL X'}")
+        print(f"\n(Q) Plateau: flat neighbourhood {r_['plateau_pct']}% vs spike {r_['spike_pct']}% "
+              f"vs dead {r_['dead_pct']}% (n={r_['n']} neighbours, free from the CPCV matrix)")
+        print(f"    -> {'PASS OK (a spike in parameter space is rejected)' if plateau_ok else 'FAIL X'}")
+        print(f"\n(R) Beat-random: real edge beat {t_['strong_beat_pct']}% of the reference -> "
+              f"{t_['strong_k1']}; noise -> {t_['noise_k1']}; bar rises {t_['bar_k1']}% (k=1) -> "
+              f"{t_['bar_k500']}% (k=500); no reference -> {t_['cold']}")
+        print(f"    -> {'PASS OK (sigma-free bar, multiplicity-aware)' if brand_ok else 'FAIL X'}")
         ok = all([trap_ok, edge_ok, neff_ok, dir_ok, robust_ok, keff_ok, dedup_ok,
                   stage_ok, book_ok, vocab_ok, memory_ok,
-                  bandit_ok, sigma_ok_b, retain_ok, cover_ok])
+                  bandit_ok, sigma_ok_b, retain_ok, cover_ok,
+                  shape_ok, plateau_ok, brand_ok])
         verdict = "TRUSTWORTHY" if ok else "NOT TRUSTWORTHY — DO NOT PROCEED"
         print("\n" + "=" * 72)
         print(f" RESULT: gauntlet is {verdict}")
@@ -750,10 +867,12 @@ def run(verbose: bool = True) -> dict:
             "robust_ok": robust_ok, "keff_ok": keff_ok, "dedup_ok": dedup_ok, "stage_ok": stage_ok,
             "book_ok": book_ok, "vocab_ok": vocab_ok, "memory_ok": memory_ok,
             "bandit_ok": bandit_ok, "sigma_ok_b": sigma_ok_b, "retain_ok": retain_ok,
-            "cover_ok": cover_ok,
+            "cover_ok": cover_ok, "shape_ok": shape_ok, "plateau_ok": plateau_ok,
+            "brand_ok": brand_ok,
             "overfit": a, "edge": b, "neff": c, "directional": d, "robustness": e,
             "keff": f, "dedup": h, "two_stage": i, "book": j, "vocab": k_, "memory": l,
-            "bandit": m, "stage_b_sigma": n, "retention": o, "coverage": p}
+            "bandit": m, "stage_b_sigma": n, "retention": o, "coverage": p,
+            "equity_shape": q, "plateau": r_, "beat_random": t_}
 
 
 if __name__ == "__main__":
@@ -762,4 +881,5 @@ if __name__ == "__main__":
     sys.exit(0 if all(r[k] for k in ("trap_ok", "edge_ok", "neff_ok", "dir_ok", "robust_ok",
                                      "keff_ok", "dedup_ok", "stage_ok", "book_ok", "vocab_ok",
                                      "memory_ok", "bandit_ok", "sigma_ok_b", "retain_ok",
-                                     "cover_ok")) else 1)
+                                     "cover_ok", "shape_ok", "plateau_ok",
+                                     "brand_ok")) else 1)

@@ -18,3 +18,6 @@ venv/
 *.key
 *.pem
 # Parquet lake + run artifacts live under var/ (git-ignored); registries are reproducible from seed+snapshot
+
+# Third-party installers pulled in for analysis — never redistribute from this public repo
+*.exe
