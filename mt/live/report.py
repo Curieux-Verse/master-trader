@@ -89,8 +89,12 @@ def format_system_report(rep: Dict) -> str:
                          f"z={('—' if bz is None else f'{bz:+.2f}')}  "
                          f"sharpe={bo.get('book_sharpe_pp')}  (family={bo.get('n_books_tried')}, "
                          f"σ={bo.get('book_sigma_sr')} via {bo.get('sigma_source')})")
+        cand = hold.get("candidate_accesses")
+        by = hold.get("by_purpose") or {}
+        detail = ("  [" + ", ".join(f"{k}={v}" for k, v in by.items()) + "]") if by else ""
         L.append(f"   holdout budget     : {hold.get('accesses', 0)} accesses across "
-                 f"{hold.get('preregistrations', 0)} pre-registrations")
+                 f"{hold.get('preregistrations', 0)} pre-registrations"
+                 + (f"   ({cand} on CANDIDATES)" if cand is not None else "") + detail)
 
     paper = rep.get("paper", {})
     if paper:

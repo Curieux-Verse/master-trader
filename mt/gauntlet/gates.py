@@ -26,6 +26,16 @@ PBO_MAX = 0.50
 MAX_ARCHIVE_CORR = 0.90       # above this the fitness discount starts biting
 CLONE_CORR = 0.99             # above this it is the same strategy — hard reject
 FDR_Q = 0.10                  # Stage-A false-discovery rate (docs/15 §4)
+# G9 plateau: a neighbour "survives" if it keeps this share of the centre's t-stat, and the
+# genome passes if at least PLATEAU_MIN_PCT of its neighbours survive. 50%/50% is deliberately
+# forgiving — the target is the strategy whose edge VANISHES one parameter step away, not one
+# that merely degrades.
+PLATEAU_RETAIN = 0.50
+PLATEAU_MIN_PCT = 50.0
+# G10 beat-random: family-wise α spent across the candidates screened against one reference
+# distribution, and the minimum reference sample before the gate will express an opinion.
+BEAT_RANDOM_ALPHA = 0.05
+MIN_RANDOM_REF = 30
 
 
 @dataclass
@@ -237,23 +247,94 @@ def g8_orthogonality(res, ctx) -> GateResult:
 
 # ── G3 CPCV → PBO (expensive; needs evaluator) ─────────────────────────────
 def g3_cpcv_pbo(genome, ctx) -> GateResult:
+    return cpcv_and_plateau(genome, ctx)[0]
+
+
+def cpcv_and_plateau(genome, ctx):
+    """Run the parameter neighbourhood ONCE and answer both questions it can answer.
+
+    G3 (PBO) and G9 (plateau) both need the [T × K] variant return matrix, which is the single
+    most expensive object the gauntlet builds — K extra backtests per candidate. Building it
+    twice to run two gates would double the cost of the whole expensive tier for no information
+    gain, so the two gates are produced together and the runner appends both."""
     if ctx is None or ctx.eval_fn is None or ctx.panel is None:
-        return GateResult("G3_cpcv_pbo", "deferred", reason="no evaluator/panel in context")
+        d = GateResult("G3_cpcv_pbo", "deferred", reason="no evaluator/panel in context")
+        return d, GateResult("G9_plateau", "deferred", reason="no evaluator/panel in context")
     rng = np.random.default_rng(getattr(ctx, "seed", 42))
     variants = cpcv.param_variants(genome, m=getattr(ctx, "cpcv_variants", 6), rng=rng)
     mat = cpcv.returns_matrix(variants, ctx.panel, ctx.eval_fn)
     stats = cpcv.cscv_stats(mat, n_groups=getattr(ctx, "cpcv_groups", 8))
+
     if stats is None:
-        return GateResult("G3_cpcv_pbo", "deferred", reason="insufficient data for CSCV")
-    pbo = stats["pbo"]
-    passed = pbo <= PBO_MAX
-    reason = "" if passed else f"PBO={pbo:.2f} > {PBO_MAX} — parameter selection likely overfit"
-    return GateResult("G3_cpcv_pbo", "pass" if passed else "fail",
-                      {"pbo": round(pbo, 3),
-                       "oos_sharpe_median": (None if stats["oos_sharpe_median"] is None
-                                             else round(stats["oos_sharpe_median"], 3)),
-                       "prob_oos_positive": (None if stats["prob_oos_positive"] is None
-                                             else round(stats["prob_oos_positive"], 3))}, reason)
+        g3 = GateResult("G3_cpcv_pbo", "deferred", reason="insufficient data for CSCV")
+    else:
+        pbo = stats["pbo"]
+        passed = pbo <= PBO_MAX
+        g3 = GateResult("G3_cpcv_pbo", "pass" if passed else "fail",
+                        {"pbo": round(pbo, 3),
+                         "oos_sharpe_median": (None if stats["oos_sharpe_median"] is None
+                                               else round(stats["oos_sharpe_median"], 3)),
+                         "prob_oos_positive": (None if stats["prob_oos_positive"] is None
+                                               else round(stats["prob_oos_positive"], 3))},
+                        "" if passed else f"PBO={pbo:.2f} > {PBO_MAX} — parameter selection likely overfit")
+
+    p = cpcv.plateau_stats(mat, retain=PLATEAU_RETAIN)
+    if p is None:
+        g9 = GateResult("G9_plateau", "deferred", reason="no usable parameter neighbourhood")
+    else:
+        ok = p["plateau_pass_pct"] >= PLATEAU_MIN_PCT
+        g9 = GateResult("G9_plateau", "pass" if ok else "fail", p,
+                        "" if ok else (f"only {p['plateau_pass_pct']:.0f}% of {p['plateau_n']} "
+                                       f"parameter neighbours keep ≥{int(PLATEAU_RETAIN*100)}% of the "
+                                       f"edge (need {PLATEAU_MIN_PCT:.0f}%) — a spike, not a plateau"))
+    return g3, g9
+
+
+# ── G10 empirical reference distribution: skill vs a randomly CONSTRUCTED strategy ──
+def g10_beat_random(net: pd.Series, ctx) -> GateResult:
+    """Does this genome beat a randomly constructed strategy on the same data, often enough?
+
+    Every other significance gate here is PARAMETRIC: the Deflated Sharpe assumes the trial
+    Sharpes are normal with dispersion σ_SR, and we measured how badly that assumption can fail
+    — a contaminated ledger drove σ_SR to 2,497 and every z to −∞, and a σ_SR pooled over trials
+    whose T differs 76× is wrong at nearly every horizon. This gate needs no σ at all. It
+    compares the candidate's N-independent t-statistic against the EMPIRICAL distribution of
+    t-statistics produced by random genomes evaluated on the same panel.
+
+    The bar is MULTIPLICITY-AWARE, which is the part that makes it a test rather than a
+    leaderboard. Requiring a fixed percentile (Algory OS uses 85%) means that screening k
+    candidates against the same reference distribution yields k·(1−q) expected false passes; at
+    q=0.85 and the thousands of genomes a marathon evaluates, that is not a control at all.
+    Here the required quantile is q = 1 − α/k (Bonferroni over the candidates screened against
+    this reference), so the bar RISES as the search gets wider — the empirical analogue of
+    E[max of N], measured rather than assumed.
+
+    It is deliberately advisory in Stage A: it is a reference distribution over the strategy
+    SPACE, not a null hypothesis about the data. Random genomes are not guaranteed edgeless —
+    some random momentum rule really does work — so failing it is evidence of weakness, not
+    proof of absence."""
+    ref = getattr(ctx, "random_ref", None) if ctx is not None else None
+    n = int(len(net))
+    if not ref or len(ref) < MIN_RANDOM_REF or n < MIN_PERIODS:
+        return GateResult("G10_beat_random", "deferred",
+                          {"random_n": (0 if not ref else len(ref))},
+                          "no reference distribution of random strategies yet")
+    srpp = _sharpe(net.to_numpy())
+    if not np.isfinite(srpp) or abs(srpp) > MAX_SANE_SR_PP:
+        return GateResult("G10_beat_random", "fail", {"edge_t": None}, "degenerate return series")
+    edge_t = float(srpp * np.sqrt(n))
+    arr = np.asarray([x for x in ref if np.isfinite(x)], dtype=float)
+    beat_pct = float(np.mean(arr < edge_t) * 100.0)
+    k = max(1, int(getattr(ctx, "random_ref_k", 1) or 1))
+    required = (1.0 - BEAT_RANDOM_ALPHA / k) * 100.0
+    required = float(min(required, 100.0 * (1.0 - 1.0 / (len(arr) + 1))))   # can't exceed resolution
+    passed = beat_pct >= required
+    return GateResult("G10_beat_random", "pass" if passed else "fail",
+                      {"edge_t": round(edge_t, 4), "beat_random_pct": round(beat_pct, 2),
+                       "br_required_pct": round(required, 2), "random_n": int(arr.size),
+                       "br_adaptive_k": k},
+                      "" if passed else (f"beat {beat_pct:.0f}% of {arr.size} random strategies, "
+                                         f"bar is {required:.1f}% at k={k}"))
 
 
 # ── G6 transfer / true out-of-sample (expensive; needs holdout) ────────────

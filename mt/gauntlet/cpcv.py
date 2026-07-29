@@ -175,3 +175,51 @@ def cscv_stats(mat: np.ndarray, n_groups: int = 8, embargo_frac: float = 0.02) -
         "oos_sharpe_median": float(np.median(ob)) if len(ob) else None,
         "prob_oos_positive": float(np.mean(ob > 0)) if len(ob) else None,
     }
+
+
+def plateau_stats(mat: Optional[np.ndarray], retain: float = 0.5) -> Optional[Dict]:
+    """Is this genome sitting on a PLATEAU in parameter space, or balanced on a spike?
+
+    PBO and the plateau statistic are two different questions asked of the same neighbourhood,
+    which is why this reads the matrix CSCV already built and costs no extra backtests:
+
+      • PBO asks a SELECTION question — if I pick the best variant in-sample, does it stay good
+        out-of-sample? It is about how the tuning was chosen.
+      • The plateau asks a STABILITY question — do the genome's NEIGHBOURS still work at all?
+        A strategy whose edge evaporates when its windows move by a few bars has been fitted to
+        the noise of one particular parameterisation, and it will not survive contact with a
+        slightly different market.
+
+    A genome can pass one and fail the other. A flat, mediocre neighbourhood scores a low PBO
+    (nothing to overfit to) while a sharp peak surrounded by dead variants scores a high plateau
+    only if the peak itself is the centre — hence both are enforced.
+
+    Column 0 of `mat` is the unperturbed genome (see `param_variants`); the rest are its
+    neighbours. Returns the fraction of NEIGHBOURS that keep a positive edge and retain at least
+    `retain` of the centre's t-statistic.
+
+    These evaluations are NOT charged to the trial ledger. A neighbour is never promoted and is
+    never compared against its siblings to pick a winner — the statistic is the *fraction that
+    survive*, not the maximum. Charging them would inflate N for a robustness measurement,
+    exactly the confusion the ledger-dedup rule exists to prevent."""
+    if mat is None or mat.ndim != 2 or mat.shape[1] < 3 or mat.shape[0] < 20:
+        return None
+    T, K = mat.shape
+    t = _col_sharpe(mat) * np.sqrt(T)            # per-column t-stat, N-independent
+    centre = float(t[0])
+    nb = t[1:]
+    nb = nb[np.isfinite(nb)]
+    if nb.size == 0 or not np.isfinite(centre):
+        return None
+    if centre <= 0:
+        # a centre with no edge has no plateau to stand on; report it rather than dividing by it
+        return {"plateau_pass_pct": 0.0, "plateau_n": int(nb.size), "centre_t": round(centre, 4),
+                "neighbour_t_median": round(float(np.median(nb)), 4)}
+    keep = (nb > 0) & (nb >= retain * centre)
+    return {
+        "plateau_pass_pct": round(float(np.mean(keep)) * 100.0, 2),
+        "plateau_n": int(nb.size),
+        "centre_t": round(centre, 4),
+        "neighbour_t_median": round(float(np.median(nb)), 4),
+        "retain_frac": retain,
+    }

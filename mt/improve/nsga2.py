@@ -33,7 +33,16 @@ def objectives(report: GauntletReport) -> np.ndarray:
     `edge_t` is deliberately included and deliberately FIRST-CLASS: it is the only component that
     does not move when the trial ledger grows. Ranking purely on N-deflated quantities made a
     parent and its child incomparable across generations, since both were being shifted by a
-    counter that has nothing to do with either strategy (docs/15 §4)."""
+    counter that has nothing to do with either strategy (docs/15 §4).
+
+    ONLY `k_ratio` was added from the equity-shape family, and that restraint is deliberate.
+    Pareto dominance degrades badly as objectives multiply — beyond roughly five or six, almost
+    every solution is non-dominated, every front collapses into one, and selection falls back to
+    crowding distance alone, which is diversity pressure with no quality pressure behind it. This
+    vector is already at seven. `persistence` and `recovery_factor` are therefore recorded, gated
+    and reported, but they do NOT get their own axis: k_ratio is the one that carries information
+    the others miss (a t-statistic of the equity trend, so it prices choppiness), while the other
+    two are largely monotone in drawdown and return, which are represented already."""
     f = report.fitness
     ds = f.get("deflated_sharpe")
     if ds is None:
@@ -45,7 +54,8 @@ def objectives(report: GauntletReport) -> np.ndarray:
     nac = _num(f.get("neg_archive_corr"), 0.0)
     neg_cx = _num(f.get("neg_complexity", -6), -6.0)
     oos = _num(f.get("cpcv_oos_sharpe"), 0.0)          # reward configs that survive CPCV OOS (B7)
-    return np.array([ds, edge, omp, cap, neg_cx, nac, oos], dtype=float)
+    kr = _num(f.get("k_ratio"), -5.0)                  # SHAPE: straightness of the equity climb
+    return np.array([ds, edge, omp, cap, neg_cx, nac, oos, kr], dtype=float)
 
 
 def _dominates(a: np.ndarray, b: np.ndarray) -> bool:

@@ -10,9 +10,9 @@ from __future__ import annotations
 
 import json
 import math
-from collections import Counter
+from collections import Counter, deque
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple
+from typing import Deque, Dict, List, Optional, Tuple
 
 import numpy as np
 
@@ -59,6 +59,10 @@ class DiscoveryLoop:
         self.archive_returns: Dict[str, np.ndarray] = {}
         self.member_returns: Dict[str, object] = {}          # genome_id → net returns, for the book
         self.pending_mutations: List[Genome] = []
+        # G10's empirical reference: edge_t of RANDOMLY CONSTRUCTED genomes on this panel. Bounded
+        # and rolling, because the panel it describes is fixed but the sample should stay recent
+        # enough to reflect the current lake snapshot.
+        self.random_ref: Deque[float] = deque(maxlen=400)
         self.generation = 0
         # Rebuild the miner's persisted vocabulary FIRST: warm-start reconstructs genomes from the
         # store, and any genome built on a minted intx_* op fails typecheck until its op exists
@@ -138,7 +142,9 @@ class DiscoveryLoop:
         # production run ended up reading it 23,030 times (docs/15 §4).
         ctx = GauntletContext(eval_fn=lambda g, p: evaluate(g, p, self.seed), panel=self.panel,
                               holdout_panel=None, archive_returns=self.archive_returns,
-                              seed=self.seed, sr_trial_std=sr_std, fdr_threshold=fdr_thr)
+                              seed=self.seed, sr_trial_std=sr_std, fdr_threshold=fdr_thr,
+                              random_ref=list(self.random_ref),
+                              random_ref_k=max(1, len(produced)))
 
         mix = EngineMix(produced=Counter(), admits=Counter())
         fam_tested: Counter = Counter()
@@ -167,6 +173,12 @@ class DiscoveryLoop:
             et = (float(spp) * np.sqrt(npd)) if (spp is not None and np.isfinite(spp) and npd > 1) else None
             if et is not None:
                 edge_t.append(et)                            # SR·√T — significance free of the N penalty
+                # G10's reference distribution is built from the genomes the `random` engine was
+                # going to produce anyway, so the empirical bar costs no extra backtests. It has
+                # to come from RANDOM construction specifically: evolved genomes are the thing
+                # being tested, and calibrating a bar on them would compare the search to itself.
+                if engine == "random":
+                    self.random_ref.append(et)
 
             # CYCLE-LEVEL memory: one fact row per family tag, so "which families die where" is a
             # GROUP BY instead of unparseable prose (docs/15 §3).

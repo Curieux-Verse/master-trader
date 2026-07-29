@@ -226,6 +226,8 @@ def _digest(store, markets, z_trend, fam_all, pheno_all, gen, arch, admitted, t0
         "books": _books(store, loops) if loops else [],
         "confirmations": confirmations,
         "holdout": {"accesses": store.holdout_access_count(),
+                    "candidate_accesses": store.holdout_access_count(purpose="stage_b_confirm"),
+                    "by_purpose": store.holdout_access_breakdown(),
                     "preregistrations": store.prereg_count()},
         "champions": _champions(store, loops) if loops else [],
         "paper": {}, "lessons": store.lesson_count(),
