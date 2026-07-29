@@ -7,6 +7,7 @@ GauntletContext with an evaluator is supplied; otherwise they report "deferred".
 """
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from typing import Dict, Optional
 
@@ -30,6 +31,21 @@ FDR_Q = 0.10                  # Stage-A false-discovery rate (docs/15 §4)
 # genome passes if at least PLATEAU_MIN_PCT of its neighbours survive. 50%/50% is deliberately
 # forgiving — the target is the strategy whose edge VANISHES one parameter step away, not one
 # that merely degrades.
+#
+# CALIBRATED 2026-07-29 on 25 genomes the production search actually promoted, re-simulated
+# across an edge gradient (median 11 tunable numeric args each, all perturbed at once):
+#     drift 0.0000 (pure random walk) -> median pass 20%,  G9 REJECTS 84%
+#     drift 0.0004 (very weak edge)   -> median pass 60-80%, G9 rejects  0%
+#     drift 0.0010 (weak edge)        -> median pass 60%,  G9 rejects  0%
+# So the gate kills most of what has no edge and none of what has even a very weak one. The
+# thresholds below are kept.
+#
+# It also settled a cost question. `ArgSpec.mutate` steps by 15% of the FULL parameter range,
+# which looked far too coarse for a "neighbourhood" — but shrinking it to 0.25× changed the
+# rejection rates not at all (84% / 0% at both), only widening the margin on weak edges. Since a
+# different scale would need its OWN variant matrix — doubling the most expensive tier in the
+# gauntlet — G9 keeps sharing G3's matrix and stays free. `param_variants(scale=…)` remains
+# available if a future recalibration ever justifies paying for it.
 PLATEAU_RETAIN = 0.50
 PLATEAU_MIN_PCT = 50.0
 # G10 beat-random: family-wise α spent across the candidates screened against one reference
@@ -326,15 +342,33 @@ def g10_beat_random(net: pd.Series, ctx) -> GateResult:
     arr = np.asarray([x for x in ref if np.isfinite(x)], dtype=float)
     beat_pct = float(np.mean(arr < edge_t) * 100.0)
     k = max(1, int(getattr(ctx, "random_ref_k", 1) or 1))
-    required = (1.0 - BEAT_RANDOM_ALPHA / k) * 100.0
-    required = float(min(required, 100.0 * (1.0 - 1.0 / (len(arr) + 1))))   # can't exceed resolution
-    passed = beat_pct >= required
-    return GateResult("G10_beat_random", "pass" if passed else "fail",
-                      {"edge_t": round(edge_t, 4), "beat_random_pct": round(beat_pct, 2),
-                       "br_required_pct": round(required, 2), "random_n": int(arr.size),
-                       "br_adaptive_k": k},
-                      "" if passed else (f"beat {beat_pct:.0f}% of {arr.size} random strategies, "
-                                         f"bar is {required:.1f}% at k={k}"))
+    alpha_k = BEAT_RANDOM_ALPHA / k
+
+    # Proper permutation p-value with the +1 correction (Phipson & Smyth 2010): a resampling
+    # p-value must never be reported as 0, because the observed statistic is itself one draw from
+    # the reference set. The smallest value it can take is 1/(n+1), and that is exactly the
+    # RESOLUTION of the test.
+    p_emp = (1.0 + float(np.sum(arr >= edge_t))) / (float(arr.size) + 1.0)
+    min_p = 1.0 / (float(arr.size) + 1.0)
+    stats = {"edge_t": round(edge_t, 4), "beat_random_pct": round(beat_pct, 2),
+             "p_empirical": round(p_emp, 5), "alpha_k": round(alpha_k, 5),
+             "random_n": int(arr.size), "br_adaptive_k": k,
+             "n_ref_needed": int(math.ceil(k / BEAT_RANDOM_ALPHA) - 1)}
+
+    # UNDERPOWERED ⇒ ABSTAIN, never silently substitute an easier test. With 40 reference draws
+    # the smallest attainable p is 1/41 = 0.024, so at k=6 (α/k = 0.0083) the required level is
+    # unreachable. Clamping the requirement to what the sample CAN express — which is what this
+    # gate did originally — quietly turns a 0.008-level test into a 0.024-level one and reports it
+    # as if the bar had been met. A test that cannot reach its own α has no power and must say so.
+    if min_p > alpha_k:
+        return GateResult("G10_beat_random", "deferred", stats,
+                          f"reference of {arr.size} draws resolves only to p={min_p:.4f}; "
+                          f"α/k={alpha_k:.4f} needs n≥{stats['n_ref_needed']}")
+
+    passed = p_emp <= alpha_k
+    return GateResult("G10_beat_random", "pass" if passed else "fail", stats,
+                      "" if passed else (f"beat {beat_pct:.0f}% of {arr.size} random strategies "
+                                         f"(p={p_emp:.4f} vs α/k={alpha_k:.4f} at k={k})"))
 
 
 # ── G6 transfer / true out-of-sample (expensive; needs holdout) ────────────

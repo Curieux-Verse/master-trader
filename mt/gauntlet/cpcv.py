@@ -23,21 +23,29 @@ from mt.genome.registry import REGISTRY
 from mt.genome.schema import Genome
 
 
-def _perturb(op_name: str, args: dict, rng: np.random.Generator) -> int:
+def _perturb(op_name: str, args: dict, rng: np.random.Generator, scale: float = 1.0) -> int:
     """Perturb the NUMERIC (int/float) args of one op in-place; return how many were changed.
-    `mutate` is a no-op for choice/bool kinds, so only tunable numerics move."""
+    `mutate` is a no-op for choice/bool kinds, so only tunable numerics move.
+
+    `scale` multiplies the step. `ArgSpec.mutate` moves a value by N(0, 0.15·(high−low)) — 15% of
+    the FULL parameter range, applied to every numeric arg at once. That is right for CSCV, which
+    wants a genuinely diverse configuration family to test selection against, but it is far too
+    coarse for a PLATEAU, which has to ask what happens in the immediate vicinity. Measured on
+    real promoted genomes, the default step moves a lookback of 20 to anywhere in [5, 200]; a
+    "neighbour" that distant is a different strategy, not a neighbour."""
     spec = REGISTRY.get(op_name)
     if not spec:
         return 0
     n = 0
     for k, aspec in spec.args.items():
         if aspec.kind in ("int", "float") and k in args:
-            args[k] = aspec.mutate(args[k], rng)
+            args[k] = aspec.mutate(args[k], rng, scale=scale)
             n += 1
     return n
 
 
-def param_variants(genome: Genome, m: int, rng: np.random.Generator) -> List[Genome]:
+def param_variants(genome: Genome, m: int, rng: np.random.Generator,
+                   scale: float = 1.0) -> List[Genome]:
     """m genomes: the original + (m-1) with perturbed numeric args across the WHOLE genome —
     feature AND signal/sizing/risk (horizon, top_frac, thresholds, sl/tp mults, …). Perturbing
     only *feature* args (the old behaviour) meant a genome whose features expose no int/float
@@ -51,11 +59,11 @@ def param_variants(genome: Genome, m: int, rng: np.random.Generator) -> List[Gen
     for _ in range(m - 1):
         v = copy.deepcopy(genome)
         for f in v.features:
-            _perturb(f.op, f.args, rng)
-        _perturb(v.signal.op, v.signal.args, rng)
-        _perturb(v.sizing.op, v.sizing.args, rng)
-        _perturb(v.risk.op, v.risk.args, rng)
-        v.generator = "cpcv_variant"
+            _perturb(f.op, f.args, rng, scale=scale)
+        _perturb(v.signal.op, v.signal.args, rng, scale=scale)
+        _perturb(v.sizing.op, v.sizing.args, rng, scale=scale)
+        _perturb(v.risk.op, v.risk.args, rng, scale=scale)
+        v.generator = "cpcv_variant" if scale >= 1.0 else "plateau_variant"
         variants.append(v)
     return variants
 

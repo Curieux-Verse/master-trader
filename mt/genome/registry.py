@@ -58,10 +58,13 @@ class ArgSpec:
         v = max(self.low, min(self.high, v))
         return int(round(v)) if self.kind == "int" else float(v)
 
-    def mutate(self, v, rng: np.random.Generator):
+    def mutate(self, v, rng: np.random.Generator, scale: float = 1.0):
+        """Move a value. `scale` shrinks (or widens) the step for callers that need a genuinely
+        LOCAL neighbourhood — the plateau gate — rather than the broad exploration step evolution
+        and CSCV want. At scale=1 the step is 15% of the full parameter range."""
         if self.kind in ("choice", "bool"):
-            return self.sample(rng)
-        step = (self.high - self.low) * 0.15
+            return self.sample(rng) if scale >= 1.0 else v      # local ⇒ don't re-roll categories
+        step = (self.high - self.low) * 0.15 * float(scale)
         return self.clamp(v + rng.normal(0.0, step))
 
     def is_bounded(self) -> bool:
