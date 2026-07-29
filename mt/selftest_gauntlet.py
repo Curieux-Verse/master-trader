@@ -684,15 +684,26 @@ def experiment_beat_random(seed: int = 33) -> dict:
     noise = series(0.0)
     r_strong_k1 = g10_beat_random(strong, ctx(1))
     r_noise_k1 = g10_beat_random(noise, ctx(1))
-    r_strong_k500 = g10_beat_random(strong, ctx(500))
-    bar1 = r_strong_k1.stats["br_required_pct"]
-    bar500 = r_strong_k500.stats["br_required_pct"]
+    r_strong_k6 = g10_beat_random(strong, ctx(6))
+    # UNDERPOWERED CASES MUST ABSTAIN, NOT SILENTLY SUBSTITUTE AN EASIER TEST.
+    # A permutation p-value over n draws cannot go below 1/(n+1). The production replay found
+    # Stage B pairing 40 reference draws (resolution p=0.024) with k=6 finalists (needs 0.0083):
+    # the original code clamped the requirement to what the sample could express, turning a
+    # 0.008-level test into a 0.024-level one and reporting it as if the bar had been met.
+    small_ref = GauntletContext(random_ref=ref[:40], random_ref_k=6)
+    r_small = g10_beat_random(strong, small_ref)
+    big_k = g10_beat_random(strong, ctx(500))       # α/k below what 200 draws can resolve
     cold = g10_beat_random(strong, GauntletContext(random_ref=[0.1, 0.2]))
-    return {"strong_beat_pct": r_strong_k1.stats["beat_random_pct"], "bar_k1": bar1,
-            "bar_k500": bar500, "strong_k1": r_strong_k1.status, "noise_k1": r_noise_k1.status,
+    return {"strong_beat_pct": r_strong_k1.stats["beat_random_pct"],
+            "p_k1": r_strong_k1.stats["p_empirical"], "alpha_k1": r_strong_k1.stats["alpha_k"],
+            "alpha_k6": r_strong_k6.stats["alpha_k"], "strong_k1": r_strong_k1.status,
+            "noise_k1": r_noise_k1.status, "small_ref": r_small.status,
+            "n_needed": r_small.stats["n_ref_needed"], "big_k": big_k.status,
             "cold": cold.status, "alpha": BEAT_RANDOM_ALPHA,
             "ok": bool(r_strong_k1.passed and not r_noise_k1.passed
-                       and bar500 > bar1                     # bar rises with the family
+                       and r_strong_k6.stats["alpha_k"] < r_strong_k1.stats["alpha_k"]
+                       and r_small.status == "deferred"      # underpowered ⇒ abstain
+                       and big_k.status == "deferred"
                        and cold.status == "deferred")}       # no reference ⇒ no opinion
 
 
@@ -851,10 +862,12 @@ def run(verbose: bool = True) -> dict:
         print(f"\n(Q) Plateau: flat neighbourhood {r_['plateau_pct']}% vs spike {r_['spike_pct']}% "
               f"vs dead {r_['dead_pct']}% (n={r_['n']} neighbours, free from the CPCV matrix)")
         print(f"    -> {'PASS OK (a spike in parameter space is rejected)' if plateau_ok else 'FAIL X'}")
-        print(f"\n(R) Beat-random: real edge beat {t_['strong_beat_pct']}% of the reference -> "
-              f"{t_['strong_k1']}; noise -> {t_['noise_k1']}; bar rises {t_['bar_k1']}% (k=1) -> "
-              f"{t_['bar_k500']}% (k=500); no reference -> {t_['cold']}")
-        print(f"    -> {'PASS OK (sigma-free bar, multiplicity-aware)' if brand_ok else 'FAIL X'}")
+        print(f"\n(R) Beat-random: real edge p={t_['p_k1']} vs alpha={t_['alpha_k1']} -> "
+              f"{t_['strong_k1']}; noise -> {t_['noise_k1']}; alpha tightens "
+              f"{t_['alpha_k1']} (k=1) -> {t_['alpha_k6']} (k=6)")
+        print(f"    underpowered abstains: 40 refs at k=6 -> {t_['small_ref']} "
+              f"(needs n>={t_['n_needed']});  k=500 -> {t_['big_k']};  no reference -> {t_['cold']}")
+        print(f"    -> {'PASS OK (sigma-free, multiplicity-aware, abstains when it lacks power)' if brand_ok else 'FAIL X'}")
         ok = all([trap_ok, edge_ok, neff_ok, dir_ok, robust_ok, keff_ok, dedup_ok,
                   stage_ok, book_ok, vocab_ok, memory_ok,
                   bandit_ok, sigma_ok_b, retain_ok, cover_ok,

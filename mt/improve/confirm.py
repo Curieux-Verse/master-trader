@@ -35,7 +35,12 @@ from mt.gauntlet import Gauntlet, GauntletContext
 from mt.gauntlet.runner import STAGE_CONFIRM
 from mt.sim import evaluate
 
-N_HOLDOUT_REFERENCE = 40      # random genomes used to calibrate G10's bar on the sealed panel
+# G10's reference size is DERIVED, not chosen. A permutation p-value over n draws cannot go below
+# 1/(n+1), so to test at α/k the reference needs n ≥ ceil(k/α) − 1. A 40-draw reference resolves
+# only to p=0.024 while k=6 finalists demand 0.0083 — it would abstain, and 40 holdout reads would
+# be spent for a gate that then declines to speak. Capped because confirmations are the one place
+# holdout compute is spent, and this runs once per marathon (final digest only).
+MAX_HOLDOUT_REFERENCE = 200
 
 
 def finalists(store, market: str, limit: int = 12) -> List[str]:
@@ -90,9 +95,13 @@ def confirm(store, market: str, holdout_panel, seed: int = 4242,
     # component we found to be most fragile.
     random_ref: List[float] = []
     try:
+        import math as _math
         from mt.generators import TemplateSampler
+        from mt.gauntlet.gates import BEAT_RANDOM_ALPHA
+        n_ref = min(MAX_HOLDOUT_REFERENCE,
+                    int(_math.ceil(max(1, n_eff) / BEAT_RANDOM_ALPHA)) - 1)
         sampler = TemplateSampler(seed=seed + 77)
-        for _ in range(N_HOLDOUT_REFERENCE):
+        for _ in range(n_ref):
             rg = sampler._random(market)
             if not rg.typecheck()[0]:
                 continue

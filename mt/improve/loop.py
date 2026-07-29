@@ -144,7 +144,14 @@ class DiscoveryLoop:
                               holdout_panel=None, archive_returns=self.archive_returns,
                               seed=self.seed, sr_trial_std=sr_std, fdr_threshold=fdr_thr,
                               random_ref=list(self.random_ref),
-                              random_ref_k=max(1, len(produced)))
+                              # k=1 in Stage A ON PURPOSE. G10 is advisory here, and a
+                              # multiplicity correction belongs where a DECISION is made — Stage B,
+                              # over the pre-registered finalists. Applying a batch-sized Bonferroni
+                              # to an advisory statistic only destroys its resolution: at batch 48
+                              # the required α/k (0.00104) falls below what a 400-draw reference can
+                              # express (0.0025), so the gate would abstain every time and the
+                              # diagnostic would go silent exactly when the search is widest.
+                              random_ref_k=1)
 
         mix = EngineMix(produced=Counter(), admits=Counter())
         fam_tested: Counter = Counter()
