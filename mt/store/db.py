@@ -342,6 +342,17 @@ class MTStore:
         rho = float(np.nanmean(C[iu]))                    # signed: positive co-movement reduces independence
         return None if not np.isfinite(rho) else float(min(max(rho, 0.0), 0.99))
 
+    def last_n_periods(self, genome_id: str) -> Optional[int]:
+        """Observations this genome produced on the SEARCH panel, from its most recent trial.
+
+        Used to predict how many it will produce on the holdout before that panel is touched:
+        observation counts scale with panel length, so the ratio is knowable in advance and a
+        genome that cannot reach MIN_PERIODS there must not be pre-registered (docs/15 §4)."""
+        row = self.conn.execute(
+            "SELECT n_periods FROM result_ledger WHERE genome_id=? AND n_periods IS NOT NULL "
+            "ORDER BY eval_id DESC LIMIT 1", (genome_id,)).fetchone()
+        return int(row[0]) if row and row[0] is not None else None
+
     def trial_signatures(self, market: Optional[str] = None, sample: int = 400,
                          genome_ids: Optional[List[str]] = None) -> List:
         """The most recent parsed P&L-path signatures — raw material for K_eff.

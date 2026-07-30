@@ -707,6 +707,68 @@ def experiment_beat_random(seed: int = 33) -> dict:
                        and cold.status == "deferred")}       # no reference ⇒ no opinion
 
 
+def experiment_finalist_eligibility(seed: int = 34) -> dict:
+    """A genome that cannot reach MIN_PERIODS on the holdout must never be pre-registered.
+
+    Reproduces the 2026-07-29 production failure. T = bars/horizon, and the train and holdout
+    panels are different lengths, so G1's 20-observation floor admitted genomes during the search
+    that it then had to reject at confirmation: 12 of 21 finalists died at G1 on the holdout, some
+    with POSITIVE out-of-sample Sharpe (+3.35, +3.25). fx and xau train on ~794 bars but hold out
+    ~375, so any horizon between 19 and 39 was promotable yet structurally unconfirmable.
+
+    The cost was not the wasted evaluation. Those genomes inflated the confirmatory family — 7/9/7
+    pre-registered where only 4/3/2 were testable — so the survivors were deflated for hypotheses
+    that were never tested, exactly when crypto's book reached p=0.055."""
+    import os, tempfile
+    from mt.store import MTStore
+    from mt.improve.confirm import finalists, predicted_holdout_periods
+    from mt.gauntlet.gates import MIN_PERIODS
+    from mt.sim.evalresult import EvalResult
+
+    tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False); tmp.close()
+    store = MTStore(db_path=tmp.name)
+    TRAIN_BARS, HOLDOUT_BARS = 794, 375           # the real fx/xau geometry
+
+    # horizons spanning the dead zone: 4 and 12 are confirmable on 375 bars, 24 and 40 are not
+    horizons = [4, 12, 24, 40]
+    made = {}
+    for h in horizons:
+        g = momentum_genome(lookback=20 + h, horizon=h)
+        store.register_genome(g)
+        r = EvalResult(genome_id=g.genome_id, market="crypto", seed=1, snapshot_id="s")
+        n_train = max(2, (TRAIN_BARS - h) // h)
+        r.net_returns = pd.Series(np.random.default_rng(h).normal(0.002, 0.01, n_train))
+        r.summary = {"net_sharpe": 1.0, "sharpe_pp": 0.06, "ann_return": 0.1, "max_dd": 0.1,
+                     "hit_rate": 0.5, "avg_turnover": 0.2, "n_periods": n_train}
+        store.record_eval(r)
+        store.upsert_archive(f"crypto:h{h}:low:long:all", g.genome_id, "crypto",
+                             {"deflated_sharpe": 1.0}, {"median_holding_bars": h},
+                             1.0 - h / 100.0, promoted=True, cleared=False)
+        made[h] = (g.genome_id, n_train)
+
+    pred = {h: predicted_holdout_periods(store, gid, HOLDOUT_BARS, TRAIN_BARS)
+            for h, (gid, _n) in made.items()}
+    elig, skipped = finalists(store, "crypto", limit=12,
+                              holdout_bars=HOLDOUT_BARS, train_bars=TRAIN_BARS)
+    unfiltered, _ = finalists(store, "crypto", limit=12)      # old behaviour: no filter
+    skipped_h = sorted(h for h, (gid, _n) in made.items()
+                       if gid in {s["genome_id"] for s in skipped})
+    kept_h = sorted(h for h, (gid, _n) in made.items() if gid in set(elig))
+    store.close()
+    try:
+        os.unlink(tmp.name)
+    except OSError:
+        pass
+    return {"holdout_bars": HOLDOUT_BARS, "train_bars": TRAIN_BARS,
+            "predicted": {h: (None if v is None else round(v, 1)) for h, v in pred.items()},
+            "kept_horizons": kept_h, "skipped_horizons": skipped_h,
+            "family_before": len(unfiltered), "family_after": len(elig),
+            "ok": bool(kept_h == [4, 12] and skipped_h == [24, 40]
+                       and len(elig) < len(unfiltered)         # family actually shrinks
+                       and all(pred[h] >= MIN_PERIODS for h in kept_h)
+                       and all(pred[h] < MIN_PERIODS for h in skipped_h))}
+
+
 def experiment_failure_memory(seed: int = 16) -> dict:
     """Failures must produce AGGREGATABLE facts and a gate-specific repair.
 
@@ -774,6 +836,7 @@ def run(verbose: bool = True) -> dict:
     q = experiment_equity_shape()
     r_ = experiment_plateau()
     t_ = experiment_beat_random()
+    u_ = experiment_finalist_eligibility()
     trap_ok = not a["passed"]                       # the overfit winner MUST be rejected
     # the real edge MUST survive the exploratory screen AND clear confirmatory significance
     edge_ok = bool(b["g4_significant"]) and bool(b["promoted"])
@@ -794,6 +857,7 @@ def run(verbose: bool = True) -> dict:
     shape_ok = bool(q["ok"])                        # equity-curve shape is visible to the search
     plateau_ok = bool(r_["ok"])                     # a spike in parameter space fails, a plateau passes
     brand_ok = bool(t_["ok"])                       # empirical bar rejects noise and tightens with k
+    elig_ok = bool(u_["ok"])                        # unconfirmable elites never reach pre-registration
     if verbose:
         print("=" * 72)
         print(" GAUNTLET SELF-TEST — the critical go/no-go (docs/09 P2)")
@@ -868,10 +932,16 @@ def run(verbose: bool = True) -> dict:
         print(f"    underpowered abstains: 40 refs at k=6 -> {t_['small_ref']} "
               f"(needs n>={t_['n_needed']});  k=500 -> {t_['big_k']};  no reference -> {t_['cold']}")
         print(f"    -> {'PASS OK (sigma-free, multiplicity-aware, abstains when it lacks power)' if brand_ok else 'FAIL X'}")
+        print(f"\n(S) Finalist eligibility: holdout={u_['holdout_bars']} bars vs "
+              f"train={u_['train_bars']}; predicted holdout observations by horizon "
+              f"{u_['predicted']}")
+        print(f"    keep {u_['kept_horizons']}, drop {u_['skipped_horizons']} -> confirmatory "
+              f"family {u_['family_before']} -> {u_['family_after']} (only testable hypotheses)")
+        print(f"    -> {'PASS OK (structurally unconfirmable elites never reach pre-registration)' if elig_ok else 'FAIL X'}")
         ok = all([trap_ok, edge_ok, neff_ok, dir_ok, robust_ok, keff_ok, dedup_ok,
                   stage_ok, book_ok, vocab_ok, memory_ok,
                   bandit_ok, sigma_ok_b, retain_ok, cover_ok,
-                  shape_ok, plateau_ok, brand_ok])
+                  shape_ok, plateau_ok, brand_ok, elig_ok])
         verdict = "TRUSTWORTHY" if ok else "NOT TRUSTWORTHY — DO NOT PROCEED"
         print("\n" + "=" * 72)
         print(f" RESULT: gauntlet is {verdict}")
@@ -881,11 +951,11 @@ def run(verbose: bool = True) -> dict:
             "book_ok": book_ok, "vocab_ok": vocab_ok, "memory_ok": memory_ok,
             "bandit_ok": bandit_ok, "sigma_ok_b": sigma_ok_b, "retain_ok": retain_ok,
             "cover_ok": cover_ok, "shape_ok": shape_ok, "plateau_ok": plateau_ok,
-            "brand_ok": brand_ok,
+            "brand_ok": brand_ok, "elig_ok": elig_ok,
             "overfit": a, "edge": b, "neff": c, "directional": d, "robustness": e,
             "keff": f, "dedup": h, "two_stage": i, "book": j, "vocab": k_, "memory": l,
             "bandit": m, "stage_b_sigma": n, "retention": o, "coverage": p,
-            "equity_shape": q, "plateau": r_, "beat_random": t_}
+            "equity_shape": q, "plateau": r_, "beat_random": t_, "eligibility": u_}
 
 
 if __name__ == "__main__":
@@ -895,4 +965,4 @@ if __name__ == "__main__":
                                      "keff_ok", "dedup_ok", "stage_ok", "book_ok", "vocab_ok",
                                      "memory_ok", "bandit_ok", "sigma_ok_b", "retain_ok",
                                      "cover_ok", "shape_ok", "plateau_ok",
-                                     "brand_ok")) else 1)
+                                     "brand_ok", "elig_ok")) else 1)
