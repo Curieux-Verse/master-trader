@@ -507,13 +507,22 @@ def experiment_stage_b_sigma(seed: int = 21) -> dict:
     shipped = build_book(edge, n_books_tried=9, sr_trial_std=LEDGER_SIGMA, members=list(edge))
     fixed = build_book(edge, n_books_tried=9, sr_trial_std=LEDGER_SIGMA, members=list(edge),
                        fresh_sigma=True)
-    # null control on the SAME corrected rule
+    # null control on the SAME corrected rule.
+    # NOTE the explicit `is None` test. `(p or 1.0) < 0.05` reads naturally and is WRONG: a
+    # strongly significant result rounds `dsr_pvalue` to exactly 0.0, which is falsy, so the
+    # fallback fires and the most extreme false positive of all gets scored as "not significant".
+    # That silently understated this very null control, and in a power sweep it manufactured a
+    # collapse — apparent power fell from 82% to 30% as T grew, purely because larger samples push
+    # more p-values to 0.0.
     null_hits = 0
     for s in range(30):
         n = pool(0.0, 500 + s)
         b = build_book(n, n_books_tried=9, sr_trial_std=LEDGER_SIGMA, members=list(n),
                        fresh_sigma=True)
-        if b and (b["book_dsr_p"] or 1.0) < 0.05:
+        if b is None:
+            continue
+        p = b.get("book_dsr_p")
+        if p is not None and p < 0.05:
             null_hits += 1
     return {"guard_returned_none": guard_none,
             "shipped_z": shipped["book_dsr_z"], "shipped_sigma_src": shipped["sigma_source"],
@@ -746,6 +755,13 @@ def experiment_finalist_eligibility(seed: int = 34) -> dict:
                              1.0 - h / 100.0, promoted=True, cleared=False)
         made[h] = (g.genome_id, n_train)
 
+    # THE PRODUCTION SPLIT MUST KEEP THE HOLDOUT THE LONGER WINDOW. This is the invariant that
+    # makes the dead band impossible rather than merely small: holdout ≥ train ⇒ its horizon
+    # ceiling is ≥ the search's, so nothing promotable can be unconfirmable. Asserted here so a
+    # later edit to the fractions cannot silently reintroduce the 2026-07-29 failure.
+    from mt.run_system import TRAIN_SPAN, HOLDOUT_SPAN, span_width
+    split_ok = span_width(HOLDOUT_SPAN) >= span_width(TRAIN_SPAN)
+
     pred = {h: predicted_holdout_periods(store, gid, HOLDOUT_BARS, TRAIN_BARS)
             for h, (gid, _n) in made.items()}
     elig, skipped = finalists(store, "crypto", limit=12,
@@ -763,10 +779,13 @@ def experiment_finalist_eligibility(seed: int = 34) -> dict:
             "predicted": {h: (None if v is None else round(v, 1)) for h, v in pred.items()},
             "kept_horizons": kept_h, "skipped_horizons": skipped_h,
             "family_before": len(unfiltered), "family_after": len(elig),
+            "train_frac": round(span_width(TRAIN_SPAN), 3),
+            "holdout_frac": round(span_width(HOLDOUT_SPAN), 3), "split_ok": split_ok,
             "ok": bool(kept_h == [4, 12] and skipped_h == [24, 40]
                        and len(elig) < len(unfiltered)         # family actually shrinks
                        and all(pred[h] >= MIN_PERIODS for h in kept_h)
-                       and all(pred[h] < MIN_PERIODS for h in skipped_h))}
+                       and all(pred[h] < MIN_PERIODS for h in skipped_h)
+                       and split_ok)}                          # production split keeps the invariant
 
 
 def experiment_failure_memory(seed: int = 16) -> dict:
@@ -937,6 +956,8 @@ def run(verbose: bool = True) -> dict:
               f"{u_['predicted']}")
         print(f"    keep {u_['kept_horizons']}, drop {u_['skipped_horizons']} -> confirmatory "
               f"family {u_['family_before']} -> {u_['family_after']} (only testable hypotheses)")
+        print(f"    production split: train={u_['train_frac']} holdout={u_['holdout_frac']} -> "
+              f"holdout is the longer window = {u_['split_ok']} (dead band impossible)")
         print(f"    -> {'PASS OK (structurally unconfirmable elites never reach pre-registration)' if elig_ok else 'FAIL X'}")
         ok = all([trap_ok, edge_ok, neff_ok, dir_ok, robust_ok, keff_ok, dedup_ok,
                   stage_ok, book_ok, vocab_ok, memory_ok,
