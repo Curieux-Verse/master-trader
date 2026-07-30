@@ -34,25 +34,57 @@ from mt.live import PaperBook
 from mt.live.report import format_system_report, format_telegram_report, send_telegram
 
 
+# Point-in-time split of real history, as (start_frac, end_frac). Named so the invariant below is
+# machine-checkable: the self-test asserts holdout_width >= train_width, because the moment the
+# TRAIN window becomes the longer one, the search can promote horizons the confirmation stage
+# cannot test (see the reasoning in _build_panels).
+TRAIN_SPAN = (0.0, 0.40)
+HOLDOUT_SPAN = (0.42, 0.84)
+LIVE_SPAN = (0.86, 1.0)
+
+
+def span_width(span) -> float:
+    return float(span[1] - span[0])
+
+
 def _build_panels(market, source, snapshot_id, seed, structure):
     """Return (train, holdout, live) panels. Real data is split by TIME (point-in-time);
     synthetic data uses independent seeded realizations."""
     if source == "lake":
         if not lake_has_data(market, snapshot_id):
             return None
-        # use deep history where available (DSR power); cap keeps a 50-name book tractable.
-        # Note the ~2% EMBARGO GAPS (0.70–0.72, 0.84–0.86) dropped between splits: adjacent bars
-        # are serially correlated, so an unembargoed holdout/live isn't truly out-of-sample
-        # (López de Prado purge/embargo). The gaps make the G6 transfer + paper genuinely unseen.
-        # The confirmatory bar falls as 1/√T, so holdout LENGTH is the dominant term in whether a
-        # real strategy can ever be confirmed — more so than any statistical refinement. The old
-        # 0.72–0.84 slice gave ~180–370 usable observations, at which E[max SR] alone demanded a
-        # per-period Sharpe of 0.24–0.43; nothing could clear it. Widening to 0.55–0.80 roughly
-        # doubles T (≈−30% on the required Sharpe) while leaving discovery a 55% train window and
-        # keeping the ~2% embargo gaps that make the split genuinely point-in-time.
-        train = read_lake_panel(market, snapshot_id, 0.0, 0.53, max_bars=2000)    # discovery
-        holdout = read_lake_panel(market, snapshot_id, 0.55, 0.80, max_bars=1200)  # transfer holdout (G6)
-        live = read_lake_panel(market, snapshot_id, 0.82, 1.0, max_bars=400)      # most recent → paper
+        # ~2% EMBARGO GAPS are dropped between splits: adjacent bars are serially correlated, so an
+        # unembargoed holdout/live isn't truly out-of-sample (López de Prado purge/embargo).
+        #
+        # THE HOLDOUT IS DELIBERATELY THE LONGER WINDOW (0.42 vs 0.40), and that inequality is the
+        # invariant, not a tuning choice.
+        #
+        # A genome needs T ≥ MIN_PERIODS observations to be judged at all, and T = bars/horizon, so
+        # each window imposes a horizon ceiling of bars/MIN_PERIODS. If the training window is the
+        # longer one, its ceiling is HIGHER, and the gap between the two ceilings is a band of
+        # horizons the search can promote but the confirmation stage is structurally incapable of
+        # testing. Measured on the 2026-07-29 marathon under the old 0.53/0.25 split: fx and xau
+        # trained on ~794 bars and held out ~375, admitting horizons to 39 while confirming at most
+        # 18 — a dead band at 19–39 that killed 12 of 21 finalists at G1, several with POSITIVE
+        # out-of-sample Sharpe.
+        #
+        # Making the holdout the longer window closes that band BY CONSTRUCTION rather than
+        # shrinking it: holdout ≥ train ⇒ ceiling_holdout ≥ ceiling_train ⇒ nothing promotable is
+        # unconfirmable, at every market and every history length. Equal fractions would leave a
+        # residual band wherever rounding on the union calendar makes the holdout a few bars
+        # shorter (measured at 30–31 for fx/xau when the split was 0.42/0.40).
+        #
+        # It also buys power where it is scarcest. The confirmatory bar falls as 1/√T, so this cuts
+        # the required per-period Sharpe by ~21% (crypto ~998 → ~1600 observations, fx/xau ~375 →
+        # ~600). Stage B is the binding constraint — 0 cleared with crypto's book at p=0.055 — so
+        # history is worth more there than in a search that already had 2000 bars. Discovery pays
+        # ~13% of its t-statistic for it, the right trade while confirmation is what fails.
+        #
+        # The holdout cap matches the train cap on purpose: a smaller one (it was 1200) would
+        # silently reintroduce the asymmetry on any market with deep enough history.
+        train = read_lake_panel(market, snapshot_id, *TRAIN_SPAN, max_bars=2000)     # discovery
+        holdout = read_lake_panel(market, snapshot_id, *HOLDOUT_SPAN, max_bars=2000)  # transfer (G6)
+        live = read_lake_panel(market, snapshot_id, *LIVE_SPAN, max_bars=400)       # recent → paper
         return train, holdout, live
     a = MarketAdapter(market)
     return (a.build_panel(bars=440, seed=seed, structure=structure, snapshot_id=f"sys_{market}"),

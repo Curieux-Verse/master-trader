@@ -77,6 +77,13 @@ def format_system_report(rep: Dict) -> str:
             if rej:
                 gates = "  ".join(f"{g}×{n}" for g, n in rej.items())
                 L.append(f"           rejected by: {gates}")
+            nin = c.get("n_ineligible")
+            if nin:
+                ex = c.get("ineligible") or []
+                worst = min((e.get("predicted_holdout_periods", 0) for e in ex), default=None)
+                L.append(f"           {nin} elite(s) not eligible: too few holdout observations "
+                         f"(holdout={c.get('holdout_bars','?')} bars"
+                         + (f", worst would yield {worst}" if worst is not None else "") + ")")
             bz_best, msh = c.get("best_oos_z"), c.get("median_oos_sharpe")
             if bz_best is not None or msh is not None:
                 L.append(f"           best finalist OOS z={('—' if bz_best is None else f'{bz_best:+.2f}')}"

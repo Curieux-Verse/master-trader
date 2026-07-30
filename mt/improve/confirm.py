@@ -27,7 +27,7 @@ gauntlet — G4 included, plus CPCV and the transfer gate — on data it has nev
 """
 from __future__ import annotations
 
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 
@@ -43,19 +43,72 @@ from mt.sim import evaluate
 MAX_HOLDOUT_REFERENCE = 200
 
 
-def finalists(store, market: str, limit: int = 12) -> List[str]:
-    """The Stage-A survivors that are eligible for confirmation.
+def predicted_holdout_periods(store, genome_id: str, holdout_bars: int,
+                              train_bars: Optional[int] = None) -> Optional[float]:
+    """How many return observations will this genome produce on the holdout?
+
+    Knowable WITHOUT touching the holdout, which is what makes it usable for pre-registration:
+    it depends only on the genome's own structure and on how many bars each panel contains — a
+    shape, not an outcome.
+
+    Cross-sectional genomes are exact. The executor rebalances on `range(0, n - horizon, horizon)`,
+    so the observation count is (bars − horizon) // horizon. Directional genomes produce one
+    observation per TRADE, which cannot be derived from the horizon, so their training count is
+    scaled by the ratio of panel lengths — trade counts grow with the length of the history."""
+    g = store.get_genome(genome_id)
+    if g is None or not holdout_bars:
+        return None
+    if getattr(g.meta, "execution", "") == "cross_sectional" and g.risk.op == "horizon_hold":
+        h = max(1, int(g.risk.args.get("horizon", 1) or 1))
+        return float(max(0, (int(holdout_bars) - h) // h))
+    n_train = store.last_n_periods(genome_id)
+    if n_train and train_bars:
+        return float(n_train) * float(holdout_bars) / float(train_bars)
+    return None
+
+
+def finalists(store, market: str, limit: int = 12, holdout_bars: Optional[int] = None,
+              train_bars: Optional[int] = None) -> Tuple[List[str], List[dict]]:
+    """The Stage-A survivors that are eligible for confirmation, and those ruled ineligible.
 
     Drawn from archive elites that were PROMOTED (cleared the exploratory screen), ranked by
-    scalar fitness. Behavioural niching already guarantees they are not all the same idea."""
+    scalar fitness. Behavioural niching already guarantees they are not all the same idea.
+
+    A genome is only eligible if it can produce at least MIN_PERIODS observations on the holdout.
+    Because T = bars/horizon and the train and holdout panels are DIFFERENT LENGTHS, G1's
+    20-observation floor admits genomes during the search that it must then reject at
+    confirmation. Measured on the 2026-07-29 marathon: 12 of 21 finalists died at G1 on the
+    holdout — several with POSITIVE out-of-sample Sharpe (+3.35, +3.25) — because fx and xau
+    train on ~794 bars but hold out only ~375, so anything with a horizon between 19 and 39 is
+    promotable yet structurally unconfirmable.
+
+    Filtering them here rather than letting them fail matters twice over. They stop burning
+    pre-registration slots and holdout reads, and — the part that actually costs discoveries —
+    they stop inflating the confirmatory family. That run pre-registered 7/9/7 finalists when only
+    4/3/2 were testable, so the survivors were deflated for hypotheses that were never tested,
+    right as crypto's book came within p=0.055 of significance."""
+    from mt.gauntlet.gates import MIN_PERIODS
     rows = [r for r in store.archive_rows(market) if r["promoted"]]
     rows.sort(key=lambda r: (r["scalar_fit"] if r["scalar_fit"] is not None else float("-inf")),
               reverse=True)
-    return [r["genome_id"] for r in rows[:limit]]
+    eligible: List[str] = []
+    skipped: List[dict] = []
+    for r in rows:
+        gid = r["genome_id"]
+        if holdout_bars:
+            n = predicted_holdout_periods(store, gid, holdout_bars, train_bars)
+            if n is not None and n < MIN_PERIODS:
+                skipped.append({"genome_id": gid, "predicted_holdout_periods": round(n, 1),
+                                "min_periods": MIN_PERIODS})
+                continue
+        eligible.append(gid)
+        if len(eligible) >= limit:
+            break
+    return eligible, skipped
 
 
 def confirm(store, market: str, holdout_panel, seed: int = 4242,
-            limit: int = 12) -> Optional[Dict]:
+            limit: int = 12, train_bars: Optional[int] = None) -> Optional[Dict]:
     """Run one confirmation round. Returns a summary, or None when there is nothing to confirm.
 
     Order of operations is the whole point and must not be rearranged:
@@ -63,7 +116,14 @@ def confirm(store, market: str, holdout_panel, seed: int = 4242,
     """
     if holdout_panel is None:
         return None
-    ids = finalists(store, market, limit=limit)
+    # Panel LENGTH only — a shape, not an outcome. Reading how many bars exist is not reading
+    # what happened in them, so this is safe to consult before the list is sealed.
+    try:
+        holdout_bars = int(holdout_panel.close_matrix().shape[0])
+    except Exception:
+        holdout_bars = 0
+    ids, ineligible = finalists(store, market, limit=limit,
+                                holdout_bars=holdout_bars, train_bars=train_bars)
     if not ids:
         return None
 
@@ -190,6 +250,9 @@ def confirm(store, market: str, holdout_panel, seed: int = 4242,
         "rejected_by": dict(rejected.most_common()),
         "best_oos_z": (max(zs) if zs else None),
         "median_oos_sharpe": (float(np.median(shp)) if shp else None),
+        "holdout_bars": holdout_bars,
+        "n_ineligible": len(ineligible),
+        "ineligible": ineligible[:8],
         "holdout_accesses_total": store.holdout_access_count(market),
     }
 

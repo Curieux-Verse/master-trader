@@ -44,8 +44,14 @@ def _confirmations(store, loops):
         holdout = getattr(loop, "holdout", None)
         if holdout is None:
             continue
+        # The SEARCH panel's bar count, so eligibility can be predicted for directional genomes
+        # (whose observations are trades, not bars/horizon) before the holdout is touched.
         try:
-            r = confirm(store, m, holdout, seed=loop.seed)
+            train_bars = int(loop.panel.close_matrix().shape[0])
+        except Exception:
+            train_bars = None
+        try:
+            r = confirm(store, m, holdout, seed=loop.seed, train_bars=train_bars)
         except Exception as e:
             print(f"  [{m}] confirmation skipped: {e}")
             continue
