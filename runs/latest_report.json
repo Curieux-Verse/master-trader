@@ -1,87 +1,102 @@
 {
-  "started": "2026-11-12T16:13:05.287136+00:00",
-  "elapsed_s": 19680.2,
+  "started": "2026-11-13T16:28:36.666898+00:00",
+  "elapsed_s": 20607.7,
   "markets": [
     "crypto",
     "fx",
     "xau"
   ],
   "discovery": {
-    "generations": 9,
-    "evaluated": 1265863,
-    "promoted": 44582,
-    "rejected": 85323,
-    "admitted": 44582,
-    "reject_rate": 0.6568107463146146,
-    "n_families": 644,
+    "generations": 12,
+    "evaluated": 1267868,
+    "promoted": 44664,
+    "rejected": 86013,
+    "admitted": 44664,
+    "reject_rate": 0.6582107027250396,
+    "n_families": 753,
     "phenotypes": {
-      "cross_sectional": 377,
-      "directional": 55
+      "cross_sectional": 518,
+      "directional": 58
     },
-    "trial_corr": 0.0644,
-    "effective_trials": 733932,
+    "trial_corr": 0.0783,
+    "effective_trials": 782439,
     "keff_method": "evt",
     "bandit": {
       "template": 0.0,
       "random": 0.0,
-      "evo": 0.293,
+      "evo": 0.295,
       "miner": 0.0,
       "llm": 0.014
     },
     "trend": [
       {
         "gen": 1,
-        "edge_t_median": 1.1292,
-        "z_best": -2.41
+        "edge_t_median": 0.843,
+        "z_best": -2.1962
       },
       {
         "gen": 2,
-        "edge_t_median": 1.7416,
-        "z_best": -2.3762
+        "edge_t_median": 1.0569,
+        "z_best": -2.426
       },
       {
         "gen": 3,
-        "edge_t_median": 0.9157,
-        "z_best": -2.3809
+        "edge_t_median": 1.1941,
+        "z_best": -2.4442
       },
       {
         "gen": 4,
-        "edge_t_median": 1.3271,
-        "z_best": -2.4148
+        "edge_t_median": 0.6165,
+        "z_best": -2.4786
       },
       {
         "gen": 5,
-        "edge_t_median": 1.7935,
-        "z_best": -2.4878
+        "edge_t_median": 0.4784,
+        "z_best": -2.4308
       },
       {
         "gen": 6,
-        "edge_t_median": 1.1691,
-        "z_best": -2.3728
+        "edge_t_median": 0.9006,
+        "z_best": -2.3966
       },
       {
         "gen": 7,
-        "edge_t_median": 1.0225,
-        "z_best": -2.3578
+        "edge_t_median": 1.2806,
+        "z_best": -2.4396
       },
       {
         "gen": 8,
-        "edge_t_median": 1.1215,
-        "z_best": -2.3424
+        "edge_t_median": 1.1712,
+        "z_best": -2.4387
       },
       {
         "gen": 9,
-        "edge_t_median": 0.4871,
-        "z_best": -2.3432
+        "edge_t_median": 1.2328,
+        "z_best": -2.39
+      },
+      {
+        "gen": 10,
+        "edge_t_median": 0.9736,
+        "z_best": -2.697
+      },
+      {
+        "gen": 11,
+        "edge_t_median": 0.7021,
+        "z_best": -3.8629
+      },
+      {
+        "gen": 12,
+        "edge_t_median": 0.6491,
+        "z_best": -2.497
       }
     ],
     "dsr_z_best": 1.77028,
-    "this_run_best_z": -2.3424,
+    "this_run_best_z": -2.1962,
     "dsr_gap_to_significance": -0.125,
-    "best_z_recent": -2.3424,
-    "best_z_early": -2.3762,
-    "edge_t_slope_per_gen": -0.0729,
-    "convergence": "SOFTENING \u2014 median edge easing (-0.58); usually just exploration noise \u2014 judge by best-z, not the median"
+    "best_z_recent": -2.39,
+    "best_z_early": -2.1962,
+    "edge_t_slope_per_gen": -0.0046,
+    "convergence": "FLOOR STEADY \u2014 median edge sits at the noise floor (expected on an efficient space); judge progress by best-z, and feed new data/conditioning"
   },
   "archive": {
     "coverage": 103,
@@ -165,42 +180,35 @@
       "best_member_sharpe_pp": 0.06806,
       "mean_member_corr": -0.0026,
       "diversification_gain": 1.848,
-      "book_dsr_z": 2.95832,
+      "book_dsr_z": 2.95761,
       "book_dsr_p": 0.00155,
       "book_reliable": true,
       "book_sigma_sr": 0.018991,
       "sigma_source": "book_resample",
-      "n_books_tried": 708,
+      "n_books_tried": 710,
       "selection_trials": 408
     },
     {
       "market": "fx",
       "members": [
-        "9d8360ca8d6b7694",
-        "600ac207cc36755a",
-        "da0a03b6b2235f82",
         "bd4f741f4031d36b",
-        "3ef1687a5b8f6cf2",
-        "10c96b90dbf7178f",
-        "4e362007ea24eea7",
-        "cc430262ae4f2136",
-        "575684183c73ca58",
         "df0ebc17c1df95a1",
-        "007f95198e03fe03"
+        "cc430262ae4f2136",
+        "575684183c73ca58"
       ],
-      "n_members": 11,
-      "book_sharpe_pp": 0.21815,
-      "book_edge_t": 5.3346,
-      "best_member_sharpe_pp": 0.12878,
-      "mean_member_corr": 0.0281,
-      "diversification_gain": 1.694,
-      "book_dsr_z": 3.14289,
-      "book_dsr_p": 0.00084,
+      "n_members": 4,
+      "book_sharpe_pp": 0.54588,
+      "book_edge_t": 4.9129,
+      "best_member_sharpe_pp": 0.36806,
+      "mean_member_corr": -0.0271,
+      "diversification_gain": 1.483,
+      "book_dsr_z": 3.9228,
+      "book_dsr_p": 4e-05,
       "book_reliable": true,
-      "book_sigma_sr": 0.036968,
+      "book_sigma_sr": 0.035084,
       "sigma_source": "book_resample",
-      "n_books_tried": 658,
-      "selection_trials": 362
+      "n_books_tried": 464,
+      "selection_trials": 166
     },
     {
       "market": "xau",
@@ -208,31 +216,34 @@
         "eb525eed048be598",
         "194547d62de130d4",
         "9e73297e21dfe0ac",
-        "3248d0ebce14bb53",
-        "e88ad9ca8b34dedb",
         "1f93cce9688f5840",
         "0a324317a1c481fb",
-        "6d43805505fc36f1",
-        "b25185a315e10657"
+        "f6a075ab3b3f5419",
+        "192f6560591504e3",
+        "e88ad9ca8b34dedb",
+        "5494ff85fccc57a4",
+        "88d45506624808b5",
+        "b25185a315e10657",
+        "71ee0efccd3d4a18"
       ],
-      "n_members": 9,
-      "book_sharpe_pp": 0.32009,
-      "book_edge_t": 5.0102,
-      "best_member_sharpe_pp": 0.23729,
-      "mean_member_corr": 0.0217,
-      "diversification_gain": 1.349,
-      "book_dsr_z": 2.18614,
-      "book_dsr_p": 0.0144,
+      "n_members": 12,
+      "book_sharpe_pp": 0.3177,
+      "book_edge_t": 5.0732,
+      "best_member_sharpe_pp": 0.24478,
+      "mean_member_corr": 0.0275,
+      "diversification_gain": 1.298,
+      "book_dsr_z": 2.27709,
+      "book_dsr_p": 0.01139,
       "book_reliable": true,
-      "book_sigma_sr": 0.064166,
+      "book_sigma_sr": 0.061486,
       "sigma_source": "book_resample",
-      "n_books_tried": 539,
-      "selection_trials": 245
+      "n_books_tried": 595,
+      "selection_trials": 299
     }
   ],
   "confirmations": [
     {
-      "prereg_id": 888,
+      "prereg_id": 894,
       "list_hash": "763e1a1870c6f6b8",
       "market": "crypto",
       "family_size": 12,
@@ -348,12 +359,12 @@
         "best_member_sharpe_pp": 0.12465,
         "mean_member_corr": 0.0199,
         "diversification_gain": -0.183,
-        "book_dsr_z": -3.20775,
-        "book_dsr_p": 0.99933,
+        "book_dsr_z": -3.20976,
+        "book_dsr_p": 0.99934,
         "book_reliable": true,
         "book_sigma_sr": 0.075982,
         "sigma_source": "book_sr_se",
-        "n_books_tried": 311,
+        "n_books_tried": 313,
         "selection_trials": 0
       },
       "rejected_by": {
@@ -386,14 +397,14 @@
           "min_periods": 20
         }
       ],
-      "holdout_accesses_total": 62599
+      "holdout_accesses_total": 63021
     },
     {
-      "prereg_id": 889,
+      "prereg_id": 895,
       "list_hash": "bf3c3cc6235871f7",
       "market": "fx",
       "family_size": 12,
-      "n_eff": 8,
+      "n_eff": 7,
       "keff_method": "evt",
       "n_tested": 12,
       "n_cleared": 0,
@@ -403,85 +414,85 @@
           "genome_id": "bd4f741f4031d36b",
           "cleared": false,
           "failed_gate": "G4_deflated_sharpe",
-          "oos_sharpe": -0.28665363413560785,
-          "oos_dsr_z": -1.6092
+          "oos_sharpe": 0.12442519327001621,
+          "oos_dsr_z": -1.32283
         },
         {
           "genome_id": "733b7bbe9a39a536",
           "cleared": false,
           "failed_gate": "G4_deflated_sharpe",
-          "oos_sharpe": -0.6317307370569668,
-          "oos_dsr_z": -1.79947
+          "oos_sharpe": -1.134197453929474,
+          "oos_dsr_z": -2.00943
         },
         {
           "genome_id": "d942b7b6b2740bb6",
           "cleared": false,
           "failed_gate": "G4_deflated_sharpe",
-          "oos_sharpe": 1.4777644461449806,
-          "oos_dsr_z": -0.85898
+          "oos_sharpe": -3.1238172560206197,
+          "oos_dsr_z": -3.06023
         },
         {
           "genome_id": "29f2f979118cc8af",
           "cleared": false,
           "failed_gate": "G4_deflated_sharpe",
-          "oos_sharpe": -1.5967282916818761,
-          "oos_dsr_z": -2.40789
+          "oos_sharpe": -2.5645651960509084,
+          "oos_dsr_z": -2.70117
         },
         {
           "genome_id": "e3c022fa47dec5f7",
           "cleared": false,
           "failed_gate": "G4_deflated_sharpe",
-          "oos_sharpe": -2.4027660547136716,
-          "oos_dsr_z": -2.74453
+          "oos_sharpe": 5.397951269900506,
+          "oos_dsr_z": 0.77199
         },
         {
           "genome_id": "5937d58c8ffb8a48",
           "cleared": false,
           "failed_gate": "G1_sanity",
-          "oos_sharpe": 0.0717484166786672,
+          "oos_sharpe": 1.1357480196266698,
           "oos_dsr_z": null
         },
         {
           "genome_id": "e3e88a6b05330d37",
           "cleared": false,
           "failed_gate": "G4_deflated_sharpe",
-          "oos_sharpe": 1.609289449167376,
-          "oos_dsr_z": -0.75896
+          "oos_sharpe": 2.606152848665335,
+          "oos_dsr_z": -0.23808
         },
         {
           "genome_id": "f487ab62efbf7f6b",
           "cleared": false,
           "failed_gate": "G1_sanity",
-          "oos_sharpe": 0.3535535392963912,
+          "oos_sharpe": 1.813617606468311,
           "oos_dsr_z": null
         },
         {
           "genome_id": "c210bb8d6391c066",
           "cleared": false,
           "failed_gate": "G1_sanity",
-          "oos_sharpe": -3.0117007979020487,
+          "oos_sharpe": 0.6274750096025168,
           "oos_dsr_z": null
         },
         {
           "genome_id": "ce4f754b0aaf2aa0",
           "cleared": false,
           "failed_gate": "G1_sanity",
-          "oos_sharpe": -0.8521467110893701,
+          "oos_sharpe": -0.7899401999159599,
           "oos_dsr_z": null
         },
         {
           "genome_id": "10c96b90dbf7178f",
           "cleared": false,
           "failed_gate": "G4_deflated_sharpe",
-          "oos_sharpe": 1.6616298503028275,
-          "oos_dsr_z": -0.73071
+          "oos_sharpe": 3.6909030205691744,
+          "oos_dsr_z": 0.25842
         },
         {
           "genome_id": "cc430262ae4f2136",
           "cleared": false,
           "failed_gate": "G4_deflated_sharpe",
-          "oos_sharpe": -0.8109270544176054,
-          "oos_dsr_z": -1.89674
+          "oos_sharpe": -1.7322528859390576,
+          "oos_dsr_z": -2.33257
         }
       ],
       "book_oos": {
@@ -500,32 +511,32 @@
           "cc430262ae4f2136"
         ],
         "n_members": 12,
-        "book_sharpe_pp": -0.01099,
-        "book_edge_t": -0.1291,
-        "best_member_sharpe_pp": 0.06349,
-        "mean_member_corr": 0.0892,
-        "diversification_gain": -0.173,
-        "book_dsr_z": -3.03051,
-        "book_dsr_p": 0.99878,
+        "book_sharpe_pp": 0.00044,
+        "book_edge_t": 0.0051,
+        "best_member_sharpe_pp": 0.18424,
+        "mean_member_corr": 0.0839,
+        "diversification_gain": 0.002,
+        "book_dsr_z": -2.89662,
+        "book_dsr_p": 0.99811,
         "book_reliable": true,
-        "book_sigma_sr": 0.08468,
+        "book_sigma_sr": 0.08706,
         "sigma_source": "book_sr_se",
-        "n_books_tried": 305,
+        "n_books_tried": 306,
         "selection_trials": 0
       },
       "rejected_by": {
         "G4_deflated_sharpe": 8,
         "G1_sanity": 4
       },
-      "best_oos_z": -0.73071,
-      "median_oos_sharpe": -0.45919218559628733,
+      "best_oos_z": 0.77199,
+      "median_oos_sharpe": 0.3759501014362665,
       "holdout_bars": 630,
       "n_ineligible": 0,
       "ineligible": [],
-      "holdout_accesses_total": 44563
+      "holdout_accesses_total": 44865
     },
     {
-      "prereg_id": 890,
+      "prereg_id": 896,
       "list_hash": "0980d9aada82cdef",
       "market": "xau",
       "family_size": 12,
@@ -539,85 +550,85 @@
           "genome_id": "13d54774b0c7a373",
           "cleared": false,
           "failed_gate": "G4_deflated_sharpe",
-          "oos_sharpe": -3.1541482279439177,
-          "oos_dsr_z": -2.33606
+          "oos_sharpe": -1.2419897505890753,
+          "oos_dsr_z": -1.90833
         },
         {
           "genome_id": "7747fc4c51ee2c87",
           "cleared": false,
           "failed_gate": "G4_deflated_sharpe",
-          "oos_sharpe": 1.5482317441157563,
-          "oos_dsr_z": -1.08792
+          "oos_sharpe": 1.871858054739265,
+          "oos_dsr_z": -0.9628
         },
         {
           "genome_id": "776f1fe3f365d344",
           "cleared": false,
           "failed_gate": "G4_deflated_sharpe",
-          "oos_sharpe": 2.748998714949293,
-          "oos_dsr_z": -0.57863
+          "oos_sharpe": 3.2049020366848224,
+          "oos_dsr_z": -0.3912
         },
         {
           "genome_id": "ec2408fc1c134f00",
           "cleared": false,
           "failed_gate": "G4_deflated_sharpe",
-          "oos_sharpe": -11.243313635834403,
-          "oos_dsr_z": -3.42517
+          "oos_sharpe": -10.7839411617503,
+          "oos_dsr_z": -3.37002
         },
         {
           "genome_id": "1f93cce9688f5840",
           "cleared": false,
           "failed_gate": "G4_deflated_sharpe",
-          "oos_sharpe": 0.5785349527554705,
-          "oos_dsr_z": -1.51408
+          "oos_sharpe": 0.26436211157831024,
+          "oos_dsr_z": -1.59713
         },
         {
           "genome_id": "76f1bfbe68fe094a",
           "cleared": false,
           "failed_gate": "G4_deflated_sharpe",
-          "oos_sharpe": -5.560717903903584,
-          "oos_dsr_z": -3.12838
+          "oos_sharpe": -5.42935521222432,
+          "oos_dsr_z": -3.07396
         },
         {
           "genome_id": "88d45506624808b5",
           "cleared": false,
           "failed_gate": "G1_sanity",
-          "oos_sharpe": -0.5327756079624749,
+          "oos_sharpe": 7.511122744578167,
           "oos_dsr_z": null
         },
         {
           "genome_id": "5494ff85fccc57a4",
           "cleared": false,
           "failed_gate": "G4_deflated_sharpe",
-          "oos_sharpe": -0.9241033226169049,
-          "oos_dsr_z": -1.90956
+          "oos_sharpe": -2.468658413268335,
+          "oos_dsr_z": -2.27328
         },
         {
           "genome_id": "c526c5fa2dea2f0e",
           "cleared": false,
           "failed_gate": "G4_deflated_sharpe",
-          "oos_sharpe": 1.645090244050248,
-          "oos_dsr_z": -1.27298
+          "oos_sharpe": 0.8736305693482153,
+          "oos_dsr_z": -1.45658
         },
         {
           "genome_id": "f109376f0ecb0031",
           "cleared": false,
           "failed_gate": "G4_deflated_sharpe",
-          "oos_sharpe": -2.8056054984978887,
-          "oos_dsr_z": -2.43643
+          "oos_sharpe": -3.2995431653505896,
+          "oos_dsr_z": -2.54844
         },
         {
           "genome_id": "f6a075ab3b3f5419",
           "cleared": false,
-          "failed_gate": "G1_sanity",
-          "oos_sharpe": 0.3845550326468828,
-          "oos_dsr_z": null
+          "failed_gate": "G4_deflated_sharpe",
+          "oos_sharpe": 3.9316800462284114,
+          "oos_dsr_z": -0.29697
         },
         {
           "genome_id": "56e042a2258124d5",
           "cleared": false,
           "failed_gate": "G4_deflated_sharpe",
-          "oos_sharpe": -1.6168839701686186,
-          "oos_dsr_z": -2.66236
+          "oos_sharpe": -0.3702801156202885,
+          "oos_dsr_z": -1.88736
         }
       ],
       "book_oos": {
@@ -636,39 +647,39 @@
           "56e042a2258124d5"
         ],
         "n_members": 12,
-        "book_sharpe_pp": -0.01989,
-        "book_edge_t": -0.2976,
-        "best_member_sharpe_pp": 0.05053,
-        "mean_member_corr": 0.087,
-        "diversification_gain": -0.394,
-        "book_dsr_z": -3.19966,
-        "book_dsr_p": 0.99931,
+        "book_sharpe_pp": 0.00953,
+        "book_edge_t": 0.1433,
+        "best_member_sharpe_pp": 0.08523,
+        "mean_member_corr": 0.0921,
+        "diversification_gain": 0.112,
+        "book_dsr_z": -2.76177,
+        "book_dsr_p": 0.99713,
         "book_reliable": true,
-        "book_sigma_sr": 0.066977,
+        "book_sigma_sr": 0.066636,
         "sigma_source": "book_sr_se",
-        "n_books_tried": 307,
+        "n_books_tried": 309,
         "selection_trials": 0
       },
       "rejected_by": {
-        "G4_deflated_sharpe": 10,
-        "G1_sanity": 2
+        "G4_deflated_sharpe": 11,
+        "G1_sanity": 1
       },
-      "best_oos_z": -0.57863,
-      "median_oos_sharpe": -0.72843946528969,
+      "best_oos_z": -0.29697,
+      "median_oos_sharpe": -0.05295900202098913,
       "holdout_bars": 630,
       "n_ineligible": 0,
       "ineligible": [],
-      "holdout_accesses_total": 62238
+      "holdout_accesses_total": 62492
     }
   ],
   "holdout": {
-    "accesses": 169400,
-    "candidate_accesses": 10585,
+    "accesses": 170378,
+    "candidate_accesses": 10645,
     "by_purpose": {
-      "g10_reference": 158815,
-      "stage_b_confirm": 10585
+      "g10_reference": 159733,
+      "stage_b_confirm": 10645
     },
-    "preregistrations": 890
+    "preregistrations": 896
   },
   "champions": [
     {
@@ -703,11 +714,11 @@
     }
   ],
   "paper": {},
-  "lessons": 260958,
+  "lessons": 261365,
   "recent_lessons": [
-    "[GS_screen] volatility (directional) \u2014 raw predictive strength too weak to clear the FDR screen [p_single=0.25154, edge_t=0.6697, fdr_threshold=3.8e-05]",
-    "[G1_sanity] atr_pct+interaction+intx_c4b8f132+mined+momentum+trend (cross_sectional) \u2014 degenerate P&L \u2014 too few trades, or one bar dominates the result [n_periods=15]",
-    "[GS_screen] atr_pct+har_vol+interaction+intx_0d1f9748+intx_1b124f84+intx_214f2538+intx_4e0f2187+intx_8d20bcb1+intx_b56274fc+macro+mined+positioning (cross_sectional) \u2014 raw predictive strength too weak to clear the FDR screen [p_single=0.261087, edge_t=0.64, fdr_threshold=4e-05]",
-    "[G1_sanity] interaction+intx_7d8929ec+intx_c0c312b8+macro+mined+positioning (cross_sectional) \u2014 degenerate P&L \u2014 too few trades, or one bar dominates the result [n_periods=17]"
+    "[G1_sanity] interaction+intx_8ee2813d+intx_f208425b+mined+trend (cross_sectional) \u2014 degenerate P&L \u2014 too few trades, or one bar dominates the result [n_periods=1]",
+    "[GS_screen] interaction+intx_d2f79be9+intx_db7b4b86+mined (cross_sectional) \u2014 raw predictive strength too weak to clear the FDR screen [p_single=0.911833, edge_t=-1.3521, fdr_threshold=0.005383]",
+    "[PASS] fvg_gap+interaction+intx_05be4188+intx_05c16a60+intx_137ddd7b+intx_16aa9ad2+intx_18a73f53+intx_192bc6f5+intx_2fda5b10+intx_3b85adb2+intx_3b97b11a+intx_3f64b63b+intx_421762f1+intx_4e7895a8+intx_59dc96bb+intx_61ba4de1+intx_7045ff6b+intx_775180d8+intx_7a1c08db+intx_8482ade6+intx_b542a9c4+intx_b6c76571+intx_c14d3ea7+intx_c61582d3+intx_cc0048fa+intx_cca0d55e+intx_e1e73e84+intx_e3375dd5+intx_e7ed667f+intx_ee584aa7+intx_f59cc3dd+liquidity+microstructure+mined on a cross_sectional book promoted to the candidate pool",
+    "[G3_cpcv_pbo] fvg_gap+interaction+intx_05be4188+intx_05c16a60+intx_137ddd7b+intx_16aa9ad2+intx_18a73f53+intx_192bc6f5+intx_2fda5b10+intx_3b85adb2+intx_3b97b11a+intx_3f64b63b+intx_421762f1+intx_4e7895a8+intx_59dc96bb+intx_775180d8+intx_8482ade6+intx_b6c76571+intx_c14d3ea7+intx_cc0048fa+intx_cca0d55e+intx_e1e73e84+intx_e3375dd5+intx_e7ed667f+intx_eea5b3d9+intx_f59cc3dd+intx_fb9bad38+liquidity+microstructure+mined+momentum (cross_sectional) \u2014 parameter tuning is overfit (high PBO) [pbo=0.6, edge_t=4.4525]"
   ]
 }
