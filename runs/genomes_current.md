@@ -1,18 +1,18 @@
 # 🧬 Master Trader — Genome Population Report
 
-*Generated 2026-11-18 16:04 UTC · source `/home/runner/work/master-trader/master-trader/var/mt.db`*
+*Generated 2026-11-19 04:47 UTC · source `/home/runner/work/master-trader/master-trader/var/mt.db`*
 
 ## 1 · Executive summary
 
 | | |
 |---|---|
-| Genomes generated & tested | **141,012** |
-| Deflated-Sharpe trial count (raw N) | **760,162** *(evals 141,012 + 619,150 screened)* |
-| **Effective** independent trials (N_eff) | **716,139** *(ρ̄=0.06781349786145167 — the bar the DSR actually uses)* |
-| Admitted to archive | **10338** |
-| Rejected | **130,674** (92.7%) |
+| Genomes generated & tested | **140,995** |
+| Deflated-Sharpe trial count (raw N) | **760,602** *(evals 140,995 + 619,607 screened)* |
+| **Effective** independent trials (N_eff) | **781,035** *(ρ̄=0.06335337595689822 — the bar the DSR actually uses)* |
+| Admitted to archive | **10359** |
+| Rejected | **130,636** (92.7%) |
 | Distinct families explored | **31** |
-| Lessons accumulated | **262,381** |
+| Lessons accumulated | **262,602** |
 | Best DSR-z | **+1.503** vs bar 1.645 — below the bar |
 
 **How to read `DSR-z`:** `0` = the luck bar (what the best of N random trials would score); **`1.645` = statistically significant at p<0.05.** Higher is better; it is the single number that says how close the search is to a genuine edge.
@@ -216,14 +216,14 @@ Each candidate is killed by the **first** gate it fails. Cheap gates run first.
 
 | gate | genomes killed | share | what it means |
 |---|---:|---:|---|
-| `—` | 88,091 | 62.5% | — |
-| `GS_screen` | 22,242 | 15.8% | — |
-| `ADMITTED` | 10,338 | 7.3% | **cleared every gate** |
-| `G1_sanity` | 8,418 | 6.0% | degenerate / too few periods, or one period dominates P&L |
-| `G0_eval` | 5,912 | 4.2% | did not produce a valid backtest |
-| `G3_cpcv_pbo` | 2,681 | 1.9% | parameter tuning overfit (high PBO) |
-| `G9_plateau` | 1,682 | 1.2% | — |
-| `G5_robustness` | 1,277 | 0.9% | bootstrap tail drawdown too large |
+| `—` | 88,205 | 62.6% | — |
+| `GS_screen` | 22,123 | 15.7% | — |
+| `ADMITTED` | 10,359 | 7.3% | **cleared every gate** |
+| `G1_sanity` | 8,395 | 6.0% | degenerate / too few periods, or one period dominates P&L |
+| `G0_eval` | 5,890 | 4.2% | did not produce a valid backtest |
+| `G3_cpcv_pbo` | 2,697 | 1.9% | parameter tuning overfit (high PBO) |
+| `G9_plateau` | 1,679 | 1.2% | — |
+| `G5_robustness` | 1,276 | 0.9% | bootstrap tail drawdown too large |
 | `G8_orthogonality` | 353 | 0.3% | duplicates an existing archive member |
 | `G2_oos` | 18 | 0.0% | shines in-sample, decays out-of-sample |
 
@@ -238,85 +238,85 @@ Each candidate is killed by the **first** gate it fails. Cheap gates run first.
 
 | market | genomes | admitted | best DSR-z | vs bar (1.645) |
 |---|---:|---:|---:|---|
-| `crypto` | 48461 | 2775 | 1.50 | ████████████████·· |
-| `xau` | 46808 | 5519 | 0.76 | ████████·········· |
-| `fx` | 45743 | 2044 | 0.32 | ███··············· |
+| `crypto` | 48388 | 2803 | 1.50 | ████████████████·· |
+| `xau` | 46834 | 5519 | 0.76 | ████████·········· |
+| `fx` | 45773 | 2037 | 0.32 | ███··············· |
 
 ### 4.2 By phenotype
 **Execution style**
 
 | phenotype | genomes | admitted | best DSR-z | vs bar (1.645) |
 |---|---:|---:|---:|---|
-| `cross_sectional` | 114557 | 4861 | 1.50 | ████████████████·· |
-| `directional` | 26455 | 5477 | 0.76 | ████████·········· |
+| `cross_sectional` | 114523 | 4882 | 1.50 | ████████████████·· |
+| `directional` | 26472 | 5477 | 0.76 | ████████·········· |
 
 ### 4.3 By generation engine
 **Engine**
 
 | engine | genomes | admitted | best DSR-z | vs bar (1.645) |
 |---|---:|---:|---:|---|
-| `evo` | 86800 | 10318 | 1.50 | ████████████████·· |
-| `llm` | 14856 | 12 | 1.35 | ███████████████··· |
-| `template` | 9308 | 0 | 0.31 | ███··············· |
-| `random` | 14679 | 6 | -0.67 | ·················· |
-| `miner` | 15369 | 2 | -1.00 | ·················· |
+| `evo` | 86665 | 10339 | 1.50 | ████████████████·· |
+| `llm` | 14892 | 12 | 1.35 | ███████████████··· |
+| `template` | 9317 | 0 | 0.31 | ███··············· |
+| `random` | 14739 | 6 | -0.67 | ·················· |
+| `miner` | 15382 | 2 | -1.00 | ·················· |
 
 ### 4.4 By regime conditioning
 **Regime**
 
 | regime | genomes | admitted | best DSR-z | vs bar (1.645) |
 |---|---:|---:|---:|---|
-| `all` | 71483 | 3482 | 1.50 | ████████████████·· |
-| `low_vol` | 27263 | 5807 | 0.76 | ████████·········· |
-| `trend` | 8983 | 117 | 0.58 | ██████············ |
-| `chop` | 24907 | 885 | 0.22 | ██················ |
-| `high_vol` | 8376 | 47 | -0.37 | ·················· |
+| `all` | 71499 | 3505 | 1.50 | ████████████████·· |
+| `low_vol` | 27202 | 5807 | 0.76 | ████████·········· |
+| `trend` | 9001 | 117 | 0.58 | ██████············ |
+| `chop` | 24905 | 883 | 0.22 | ██················ |
+| `high_vol` | 8388 | 47 | -0.37 | ·················· |
 
 ### 4.5 By position sizing
 **Sizing**
 
 | sizing op | genomes | admitted | best DSR-z | vs bar (1.645) |
 |---|---:|---:|---:|---|
-| `rank_bucket` | 106732 | 5904 | 1.50 | ████████████████·· |
-| `kelly_fraction` | 3708 | 9 | 0.85 | █████████········· |
-| `fixed_fractional` | 20421 | 4405 | 0.76 | ████████·········· |
-| `vol_target` | 5589 | 10 | -0.01 | ·················· |
-| `atr_scaled` | 4562 | 10 | -1.56 | ·················· |
+| `rank_bucket` | 106674 | 5925 | 1.50 | ████████████████·· |
+| `kelly_fraction` | 3716 | 9 | 0.85 | █████████········· |
+| `fixed_fractional` | 20430 | 4405 | 0.76 | ████████·········· |
+| `vol_target` | 5601 | 10 | -0.01 | ·················· |
+| `atr_scaled` | 4574 | 10 | -1.56 | ·················· |
 
 ### 4.6 By strategy family — all 31 explored
 **Family (ranked by best DSR-z)**
 
 | family | genomes | admitted | best DSR-z | vs bar (1.645) |
 |---|---:|---:|---:|---|
-| `microstructure` | 13831 | 2443 | 1.50 | ████████████████·· |
-| `liquidity` | 13577 | 2437 | 1.50 | ████████████████·· |
-| `macro` | 22631 | 2255 | 1.38 | ███████████████··· |
-| `regime` | 6024 | 1265 | 1.38 | ███████████████··· |
-| `rates` | 3924 | 605 | 1.38 | ███████████████··· |
-| `momentum` | 21198 | 2218 | 0.86 | █████████········· |
-| `trend` | 12188 | 1257 | 0.86 | █████████········· |
-| `auction_market_theory` | 8655 | 1308 | 0.85 | █████████········· |
-| `market_profile` | 5776 | 1086 | 0.85 | █████████········· |
-| `volatility` | 14368 | 3079 | 0.76 | ████████·········· |
-| `statistical` | 14087 | 4329 | 0.76 | ████████·········· |
-| `mean_reversion` | 10815 | 3825 | 0.76 | ████████·········· |
-| `ict` | 4818 | 1067 | 0.75 | ████████·········· |
-| `smc` | 4818 | 1067 | 0.75 | ████████·········· |
-| `positioning` | 19774 | 1871 | 0.60 | ███████··········· |
-| `ml_derived` | 3555 | 1036 | 0.60 | ███████··········· |
-| `mixed` | 67574 | 994 | 0.58 | ██████············ |
-| `order_flow` | 1840 | 95 | 0.55 | ██████············ |
+| `microstructure` | 13853 | 2471 | 1.50 | ████████████████·· |
+| `liquidity` | 13599 | 2465 | 1.50 | ████████████████·· |
+| `macro` | 22601 | 2253 | 1.38 | ███████████████··· |
+| `regime` | 6025 | 1273 | 1.38 | ███████████████··· |
+| `rates` | 3929 | 605 | 1.38 | ███████████████··· |
+| `momentum` | 21265 | 2241 | 0.86 | █████████········· |
+| `trend` | 12133 | 1257 | 0.86 | █████████········· |
+| `auction_market_theory` | 8619 | 1308 | 0.85 | █████████········· |
+| `market_profile` | 5762 | 1086 | 0.85 | █████████········· |
+| `volatility` | 14366 | 3079 | 0.76 | ████████·········· |
+| `statistical` | 14077 | 4329 | 0.76 | ████████·········· |
+| `mean_reversion` | 10803 | 3825 | 0.76 | ████████·········· |
+| `ict` | 4812 | 1066 | 0.75 | ████████·········· |
+| `smc` | 4812 | 1066 | 0.75 | ████████·········· |
+| `positioning` | 19739 | 1869 | 0.60 | ███████··········· |
+| `ml_derived` | 3551 | 1044 | 0.60 | ███████··········· |
+| `mixed` | 67546 | 994 | 0.58 | ██████············ |
+| `order_flow` | 1845 | 95 | 0.55 | ██████············ |
 | `cross_asset` | 760 | 125 | 0.53 | ██████············ |
 | `intermarket` | 753 | 125 | 0.53 | ██████············ |
-| `pattern` | 7800 | 361 | 0.46 | █████············· |
-| `breakout` | 7773 | 361 | 0.46 | █████············· |
-| `oscillator` | 11713 | 347 | 0.40 | ████·············· |
+| `pattern` | 7787 | 361 | 0.46 | █████············· |
+| `breakout` | 7760 | 361 | 0.46 | █████············· |
+| `oscillator` | 11759 | 342 | 0.40 | ████·············· |
 | `event` | 605 | 136 | 0.12 | █················· |
-| `volume` | 4306 | 567 | 0.03 | ·················· |
-| `volume_profile` | 1694 | 67 | -0.16 | ·················· |
+| `volume` | 4325 | 582 | 0.03 | ·················· |
+| `volume_profile` | 1681 | 67 | -0.16 | ·················· |
 | `crypto` | 909 | 164 | -0.30 | ·················· |
 | `funding` | 909 | 164 | -0.30 | ·················· |
-| `persistence` | 1598 | 25 | -0.51 | ·················· |
+| `persistence` | 1602 | 25 | -0.51 | ·················· |
 | `calendar` | 10 | 0 | -1.69 | ·················· |
 | `sentiment` | 1 | 0 | — | ·················· |
 
@@ -376,23 +376,23 @@ Each candidate is killed by the **first** gate it fails. Cheap gates run first.
 | `xau:intraday:trade:long:chop` | xau | 0.580 |
 | `crypto:intraday:trade:short:all` | crypto | 0.555 |
 
-## 6 · Lessons library (262,381)
+## 6 · Lessons library (262,602)
 
-- ×35 — [PASS] fvg_gap+interaction+intx_05be4188+intx_05c16a60+intx_137ddd7b+intx_16aa9ad2+intx_16e5ef70+intx_18a73f53+intx_1
-- ×14 — [GS_screen] liquidity+microstructure (cross_sectional) — raw predictive strength too weak to clear the FDR screen [p_singl
+- ×30 — [PASS] fvg_gap+interaction+intx_05be4188+intx_05c16a60+intx_137ddd7b+intx_16aa9ad2+intx_16e5ef70+intx_18a73f53+intx_1
+- ×10 — [GS_screen] liquidity+microstructure (cross_sectional) — raw predictive strength too weak to clear the FDR screen [p_singl
 - ×8 — [GS_screen] liquidity+macro+microstructure+positioning (cross_sectional) — raw predictive strength too weak to clear the F
-- ×6 — [PASS] interaction+intx_137ddd7b+intx_36be56c0+intx_421762f1+intx_5e2f5700+intx_6a4b6dcc+intx_a161f1ac+intx_b6c76571+
-- ×6 — [GS_screen] momentum+oscillator+trend (cross_sectional) — raw predictive strength too weak to clear the FDR screen [p_sing
-- ×6 — [PASS] interaction+intx_137ddd7b+intx_3c9936f1+intx_421762f1+intx_423d0139+intx_7d2fa564+intx_c4e3bec1+liquidity+micr
-- ×6 — [GS_screen] liquidity+macro+microstructure+rates+regime (cross_sectional) — raw predictive strength too weak to clear the 
-- ×5 — [PASS] interaction+intx_137ddd7b+intx_16aa9ad2+intx_3b97b11a+intx_421762f1+intx_82714592+intx_9545338d+liquidity+micr
-- ×5 — [PASS] fvg_gap+interaction+intx_05be4188+intx_05c16a60+intx_137ddd7b+intx_16e5ef70+intx_18a73f53+intx_192bc6f5+intx_2
-- ×3 — [GS_screen] interaction+intx_367ec219+intx_d36b91bb+mined+momentum+oscillator+trend (cross_sectional) — raw predictive str
-- ×3 — [GS_screen] interaction+intx_14539bcd+intx_16f6ebcd+intx_27dc106a+intx_2e7d802f+intx_405ab659+intx_545064f9+intx_621f1027+
-- ×3 — [G3_cpcv_pbo] fvg_gap+interaction+intx_05be4188+intx_05c16a60+intx_137ddd7b+intx_16aa9ad2+intx_16e5ef70+intx_18a73f53+intx_1
-- ×3 — [PASS] interaction+intx_0529678c+intx_2c28f658+intx_2fda5b10+intx_374c8c96+intx_7201b206+intx_8a63d3c1+intx_ba60ed41+
-- ×3 — [PASS] interaction+intx_137ddd7b+intx_2d90fcb3+intx_36be56c0+intx_421762f1+intx_5e2f5700+intx_6a4b6dcc+intx_a161f1ac+
-- ×3 — [PASS] cumulative_delta+interaction+intx_137ddd7b+intx_2d90fcb3+intx_36be56c0+intx_421762f1+intx_5e2f5700+intx_6a4b6d
+- ×5 — [G3_cpcv_pbo] fvg_gap+interaction+intx_05be4188+intx_05c16a60+intx_137ddd7b+intx_16aa9ad2+intx_16e5ef70+intx_18a73f53+intx_1
+- ×5 — [GS_screen] momentum+oscillator+trend (cross_sectional) — raw predictive strength too weak to clear the FDR screen [p_sing
+- ×4 — [PASS] interaction+intx_137ddd7b+intx_36be56c0+intx_421762f1+intx_5e2f5700+intx_6a4b6dcc+intx_7a66cc82+intx_7bf35894+
+- ×4 — [PASS] interaction+intx_137ddd7b+intx_36be56c0+intx_421762f1+intx_5e2f5700+intx_6a4b6dcc+intx_a161f1ac+intx_b6c76571+
+- ×4 — [PASS] interaction+intx_16aa9ad2+intx_192bc6f5+intx_3b97b11a+intx_4e7895a8+intx_59dc96bb+intx_7045ff6b+intx_7a1c08db+
+- ×4 — [PASS] interaction+intx_137ddd7b+intx_16aa9ad2+intx_3b97b11a+intx_421762f1+intx_82714592+intx_9545338d+liquidity+micr
+- ×4 — [GS_screen] ict+interaction+intx_1b124f84+intx_1f414506+intx_42055f3a+intx_4e0f2187+mined+momentum+oscillator+smc (cross_s
+- ×4 — [PASS] interaction+intx_137ddd7b+intx_3c9936f1+intx_421762f1+intx_423d0139+intx_7d2fa564+intx_c4e3bec1+liquidity+micr
+- ×3 — [GS_screen] momentum+oscillator+volatility (directional) — raw predictive strength too weak to clear the FDR screen [p_sin
+- ×3 — [PASS] interaction+intx_1052e66f+intx_137ddd7b+intx_26e0fde5+intx_36be56c0+intx_421762f1+intx_5e2f5700+intx_6a4b6dcc+
+- ×3 — [GS_screen] interaction+intx_296e5aa5+intx_4807b2dc+intx_78328689+intx_9e6201bc+mined+momentum+oscillator (cross_sectional
+- ×3 — [GS_screen] interaction+intx_8ee2813d+intx_d18f920f+liquidity_sweep+macro+mined+order_block_strength+positioning (cross_se
 
 ---
 
